@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useMemo, ReactNode } from "
 import { 
   Wall, 
   BrickType, 
+  CalculatorMode,
   CalculatorSettings, 
   calculateProject, 
   CalculationResult,
@@ -13,7 +14,7 @@ import {
   DEFAULT_TN_RED_BRICK
 } from "@/lib/brickCalculator";
 
-export type CalculatorMode = 'simple' | 'multiple' | 'room' | 'bathroom' | 'compound' | 'balcony' | 'building' | 'custom' | 'visual';
+export type { CalculatorMode };
 type DifficultyLevel = 'basic' | 'advanced';
 export type TabMode = 'standard' | 'visual';
 

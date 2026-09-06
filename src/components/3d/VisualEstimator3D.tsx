@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Environment, Grid, Html } from '@react-three/drei';
 import { 
   BuildingModel, 
@@ -11,12 +11,14 @@ import {
   BrickSpecification, 
   CalculatorSettings, 
   Pillar, 
+  Unit,
   toMeters, 
   trimWallByPillars, 
   splitWallByPillars,
   getEffectivePillarPosition, 
   detectClosedStructuralBays,
   detectPillarToPillarBeams,
+  detectStructuralPillars,
   convertUnit,
   DEFAULT_RCC_REINFORCEMENT,
   RCCReinforcementConfig,
@@ -868,7 +870,7 @@ function CameraController({
   viewPreset: string;
   controlsRef: React.MutableRefObject<any>;
 }) {
-  const { camera } = import('@react-three/fiber').then ? require('@react-three/fiber').useThree() : (window as any).__THREE_FIBER_USE_THREE__ || require('@react-three/fiber').useThree();
+  const { camera } = useThree();
   
   React.useEffect(() => {
     if (viewMode === 'open-top') {
@@ -1366,7 +1368,7 @@ export function VisualEstimator3D({ model }: VisualEstimator3DProps) {
             <CameraController viewMode={viewMode} viewPreset={viewPreset} controlsRef={controlsRef} />
             <color attach="background" args={['#020617']} />
             <ambientLight intensity={0.65} />
-            <hemisphereLight skyColor="#ffffff" groundColor="#334155" intensity={0.6} />
+            <hemisphereLight args={['#ffffff', '#334155', 0.6]} />
             <directionalLight castShadow position={[15, 25, 10]} intensity={1.8} shadow-mapSize={[1024, 1024]} />
             <directionalLight position={[-15, 15, -10]} intensity={0.5} />
             
@@ -1825,7 +1827,7 @@ export function VisualEstimator3D({ model }: VisualEstimator3DProps) {
                       })}
 
                       {/* Room Labels */}
-                      {showLabels && floor.rooms?.map(room => (
+                      {showLabels && floor.rooms?.map((room: any) => (
                         <Html key={room.id} position={[toM(room.center!.x), yOffset + 0.5, -toM(room.center!.y)]} center>
                           <div className="bg-white/90 px-3 py-1 rounded text-sm font-semibold shadow pointer-events-none select-none text-gray-800">
                             {room.name}

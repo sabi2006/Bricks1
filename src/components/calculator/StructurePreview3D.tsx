@@ -306,7 +306,7 @@ export default function StructurePreview3D() {
           >
           <color attach="background" args={['#020617']} />
           <ambientLight intensity={0.5} />
-          <hemisphereLight skyColor="#ffffff" groundColor="#475569" intensity={0.6} />
+          <hemisphereLight args={['#ffffff', '#475569', 0.6]} />
           <directionalLight castShadow position={[10, 10, 5]} intensity={1.5} shadow-mapSize={[1024, 1024]} />
           <Center top>
             {renderWalls()}

@@ -1,29 +1,49 @@
 "use client";
 
-import { ReactLenis, useLenis } from "lenis/react";
 import { usePathname } from "next/navigation";
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useRef } from "react";
 
-function ScrollReset() {
+export default function SmoothScroll({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const lenis = useLenis();
+  const lenisRef = useRef<any>(null);
 
   useEffect(() => {
-    if (lenis) {
-      lenis.scrollTo(0, { immediate: true });
+    let lenis: any = null;
+    let rafId: number;
+
+    import("lenis").then(({ default: Lenis }) => {
+      lenis = new Lenis({
+        lerp: 0.08,
+        duration: 1.2,
+        smoothWheel: true,
+      });
+      lenisRef.current = lenis;
+
+      function raf(time: number) {
+        lenis.raf(time);
+        rafId = requestAnimationFrame(raf);
+      }
+
+      rafId = requestAnimationFrame(raf);
+    });
+
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      if (lenis) {
+        lenis.destroy();
+        lenisRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (lenisRef.current) {
+      lenisRef.current.scrollTo(0, { immediate: true });
     } else {
       window.scrollTo(0, 0);
     }
-  }, [pathname, lenis]);
+  }, [pathname]);
 
-  return null;
+  return <>{children}</>;
 }
 
-export default function SmoothScroll({ children }: { children: ReactNode }) {
-  return (
-    <ReactLenis root options={{ lerp: 0.08, duration: 1.2, smoothWheel: true }}>
-      <ScrollReset />
-      {children}
-    </ReactLenis>
-  );
-}

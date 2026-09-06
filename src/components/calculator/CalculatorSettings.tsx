@@ -3,17 +3,17 @@
 import { useCalculator } from "./CalculatorContext";
 import { motion } from "framer-motion";
 import { Settings2, Plus, Trash2, Maximize, Settings, AlignJustify } from "lucide-react";
-import { Unit, DEFAULT_BRICK_SIZE } from "@/lib/brickCalculator";
+import { Unit, DEFAULT_BRICK_SIZE, CalculatorMode, BrickSpecification } from "@/lib/brickCalculator";
 import { BrickPreview } from "./VisualPreviews";
 
 import { SimpleWallForm, RoomForm, CompoundWallForm, BalconyForm, BuildingForm } from './ProjectForms';
 
-const predefinedBricks = [
-  { id: "standard-red", name: "Standard TN Red Brick", length: DEFAULT_BRICK_SIZE.lengthMm, width: DEFAULT_BRICK_SIZE.widthMm, height: DEFAULT_BRICK_SIZE.heightMm },
-  { id: "modular-brick", name: "Modular Brick", length: 190, width: 90, height: 90 },
-  { id: "fly-ash", name: "Fly Ash Brick", length: 230, width: 115, height: 75 },
-  { id: "solid-block", name: "Solid Concrete Block", length: 400, width: 200, height: 200 },
-  { id: "hollow-block", name: "Hollow Concrete Block", length: 400, width: 200, height: 200 },
+const predefinedBricks: BrickSpecification[] = [
+  { id: "standard-red", productId: "standard-red", name: "Standard TN Red Brick", length: DEFAULT_BRICK_SIZE.lengthMm, width: DEFAULT_BRICK_SIZE.widthMm, height: DEFAULT_BRICK_SIZE.heightMm },
+  { id: "modular-brick", productId: "modular-brick", name: "Modular Brick", length: 190, width: 90, height: 90 },
+  { id: "fly-ash", productId: "fly-ash", name: "Fly Ash Brick", length: 230, width: 115, height: 75 },
+  { id: "solid-block", productId: "solid-block", name: "Solid Concrete Block", length: 400, width: 200, height: 200 },
+  { id: "hollow-block", productId: "hollow-block", name: "Hollow Concrete Block", length: 400, width: 200, height: 200 },
 ];
 
 export default function CalculatorSettingsPanel() {
@@ -332,78 +332,76 @@ export default function CalculatorSettingsPanel() {
                   </div>
 
                   {/* Openings in Multi Wall Mode */}
-                  {mode !== 'single' && (
-                    <div className="mt-4 pt-4 border-t border-slate-200">
-                      <div className="flex justify-between items-center mb-3">
-                        <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Doors & Windows</span>
-                        <div className="flex gap-2">
-                          <button 
-                            type="button"
-                            onClick={() => addOpening(wall.id, { id: Math.random().toString(), type: 'door', width: 3, height: 7, count: 1, unit: wall.dimensions.unit })}
-                            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] font-bold rounded flex items-center gap-1 border border-slate-200"
-                          >
-                            <Plus className="h-3 w-3 text-primary" /> Door
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={() => addOpening(wall.id, { id: Math.random().toString(), type: 'window', width: 4, height: 4, count: 1, unit: wall.dimensions.unit })}
-                            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] font-bold rounded flex items-center gap-1 border border-slate-200"
-                          >
-                            <Plus className="h-3 w-3 text-primary" /> Window
-                          </button>
-                        </div>
+                  <div className="mt-4 pt-4 border-t border-slate-200">
+                    <div className="flex justify-between items-center mb-3">
+                      <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Doors & Windows</span>
+                      <div className="flex gap-2">
+                        <button 
+                          type="button"
+                          onClick={() => addOpening(wall.id, { id: Math.random().toString(), type: 'door', width: 3, height: 7, count: 1, unit: wall.dimensions.unit })}
+                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] font-bold rounded flex items-center gap-1 border border-slate-200"
+                        >
+                          <Plus className="h-3 w-3 text-primary" /> Door
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => addOpening(wall.id, { id: Math.random().toString(), type: 'window', width: 4, height: 4, count: 1, unit: wall.dimensions.unit })}
+                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] font-bold rounded flex items-center gap-1 border border-slate-200"
+                        >
+                          <Plus className="h-3 w-3 text-primary" /> Window
+                        </button>
                       </div>
-                      {wall.openings.length > 0 && (
-                        <div className="space-y-2">
-                          {wall.openings.map((op, i) => (
-                            <div key={op.id} className="flex items-center gap-2 bg-white border border-slate-300 p-2 rounded-lg">
-                              <span className="text-xs font-bold w-14 capitalize text-slate-800">{op.type}</span>
-                              <input 
-                                type="number" 
-                                min="0" 
-                                value={op.width === 0 ? '' : op.width} 
-                                onChange={e => {
-                                  const newOps = [...wall.openings];
-                                  newOps[i].width = e.target.value === '' ? 0 : Number(e.target.value);
-                                  updateWall(wall.id, { openings: newOps });
-                                }} 
-                                className="w-14 px-1.5 py-1 border border-slate-300 rounded text-xs text-slate-900 font-bold bg-white" 
-                                placeholder="W" 
-                              />
-                              <span className="text-slate-400 text-xs">x</span>
-                              <input 
-                                type="number" 
-                                min="0" 
-                                value={op.height === 0 ? '' : op.height} 
-                                onChange={e => {
-                                  const newOps = [...wall.openings];
-                                  newOps[i].height = e.target.value === '' ? 0 : Number(e.target.value);
-                                  updateWall(wall.id, { openings: newOps });
-                                }} 
-                                className="w-14 px-1.5 py-1 border border-slate-300 rounded text-xs text-slate-900 font-bold bg-white" 
-                                placeholder="H" 
-                              />
-                              <span className="text-slate-500 text-xs ml-1 font-bold">Qty:</span>
-                              <input 
-                                type="number" 
-                                min="1" 
-                                value={op.count === 0 ? '' : op.count} 
-                                onChange={e => {
-                                  const newOps = [...wall.openings];
-                                  newOps[i].count = e.target.value === '' ? 0 : Number(e.target.value);
-                                  updateWall(wall.id, { openings: newOps });
-                                }} 
-                                className="w-12 px-1.5 py-1 border border-slate-300 rounded text-xs text-slate-900 font-bold bg-white" 
-                              />
-                              <button onClick={() => removeOpening(wall.id, op.id)} className="ml-auto text-red-500 hover:text-red-700">
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
-                  )}
+                    {wall.openings && wall.openings.length > 0 && (
+                      <div className="space-y-2">
+                        {wall.openings.map((op, i) => (
+                          <div key={op.id} className="flex items-center gap-2 bg-white border border-slate-300 p-2 rounded-lg">
+                            <span className="text-xs font-bold w-14 capitalize text-slate-800">{op.type}</span>
+                            <input 
+                              type="number" 
+                              min="0" 
+                              value={op.width === 0 ? '' : op.width} 
+                              onChange={e => {
+                                const newOps = [...wall.openings];
+                                newOps[i].width = e.target.value === '' ? 0 : Number(e.target.value);
+                                updateWall(wall.id, { openings: newOps });
+                              }} 
+                              className="w-14 px-1.5 py-1 border border-slate-300 rounded text-xs text-slate-900 font-bold bg-white" 
+                              placeholder="W" 
+                            />
+                            <span className="text-slate-400 text-xs">x</span>
+                            <input 
+                              type="number" 
+                              min="0" 
+                              value={op.height === 0 ? '' : op.height} 
+                              onChange={e => {
+                                const newOps = [...wall.openings];
+                                newOps[i].height = e.target.value === '' ? 0 : Number(e.target.value);
+                                updateWall(wall.id, { openings: newOps });
+                              }} 
+                              className="w-14 px-1.5 py-1 border border-slate-300 rounded text-xs text-slate-900 font-bold bg-white" 
+                              placeholder="H" 
+                            />
+                            <span className="text-slate-500 text-xs ml-1 font-bold">Qty:</span>
+                            <input 
+                              type="number" 
+                              min="1" 
+                              value={op.count === 0 ? '' : op.count} 
+                              onChange={e => {
+                                const newOps = [...wall.openings];
+                                newOps[i].count = e.target.value === '' ? 0 : Number(e.target.value);
+                                updateWall(wall.id, { openings: newOps });
+                              }} 
+                              className="w-12 px-1.5 py-1 border border-slate-300 rounded text-xs text-slate-900 font-bold bg-white" 
+                            />
+                            <button onClick={() => removeOpening(wall.id, op.id)} className="ml-auto text-red-500 hover:text-red-700">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -453,7 +451,7 @@ export default function CalculatorSettingsPanel() {
                 type="number" 
                 min="0" 
                 value={brickType.length === 0 ? '' : brickType.length} 
-                onChange={e => setBrickType({...brickType, length: e.target.value === '' ? 0 : Number(e.target.value), id: 'custom'})} 
+                onChange={e => setBrickType({...brickType, length: e.target.value === '' ? 0 : Number(e.target.value), id: 'custom', productId: 'custom'})} 
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-primary outline-none transition-all text-slate-900 font-bold" 
               />
             </div>
@@ -463,7 +461,7 @@ export default function CalculatorSettingsPanel() {
                 type="number" 
                 min="0" 
                 value={brickType.width === 0 ? '' : brickType.width} 
-                onChange={e => setBrickType({...brickType, width: e.target.value === '' ? 0 : Number(e.target.value), id: 'custom'})} 
+                onChange={e => setBrickType({...brickType, width: e.target.value === '' ? 0 : Number(e.target.value), id: 'custom', productId: 'custom'})} 
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-primary outline-none transition-all text-slate-900 font-bold" 
               />
             </div>
@@ -473,7 +471,7 @@ export default function CalculatorSettingsPanel() {
                 type="number" 
                 min="0" 
                 value={brickType.height === 0 ? '' : brickType.height} 
-                onChange={e => setBrickType({...brickType, height: e.target.value === '' ? 0 : Number(e.target.value), id: 'custom'})} 
+                onChange={e => setBrickType({...brickType, height: e.target.value === '' ? 0 : Number(e.target.value), id: 'custom', productId: 'custom'})} 
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-primary outline-none transition-all text-slate-900 font-bold" 
               />
             </div>

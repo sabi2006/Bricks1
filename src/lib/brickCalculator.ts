@@ -49,11 +49,13 @@ export interface Pillar {
   id: string;
   name?: string;
   floorId?: string;
+  verticalColumnId?: string;
   width: number;
   depth: number;
   height: number;
   count: number;
   unit: Unit;
+  heightUnit?: Unit;
   position?: Coordinate;
   placementType?: 'corner' | 'wall_joint' | 'wall_end' | 'wall' | 'custom' | 'central';
   alignment?: 'centre' | 'outside_corner' | 'inside_corner' | 'flush_exterior' | 'flush_interior' | 'custom_offset';
@@ -655,7 +657,8 @@ export const DEFAULT_BRICK_SIZE: BrickSizeConfig = {
 };
 
 export interface BrickSpecification {
-  productId: string;
+  id?: string;
+  productId?: string;
   brickType?: string;
   name: string; // Keeping for compatibility or maps to brickName
   length: number; // in mm (maps to brickLength)
@@ -680,6 +683,9 @@ export const DEFAULT_TN_RED_BRICK: BrickSpecification = {
   brickColor: 'Natural Terracotta',
   supplierBrand: 'A V M Bricks'
 };
+
+export type BrickType = BrickSpecification;
+export type CalculatorMode = 'single' | 'simple' | 'multiple' | 'room' | 'bathroom' | 'compound' | 'balcony' | 'building' | 'custom' | 'visual';
 
 export interface FloorMasonryEstimate {
   floorId: string;
@@ -967,16 +973,21 @@ export interface FootingItemEstimate {
   pillarName?: string;
   position?: Coordinate;
   excavationVolumeM3: number;
+  excavationVolumeCft: number;
   sandFillVolumeM3: number;
   sandFillCft: number;
+  sandFillVolumeCft: number;
   pccVolumeM3: number;
   pccVolumeCft: number;
+  pccMixRatio: string;
   pccCementBags: number;
   pccSandCft: number;
   pccAggregateCft: number;
   pccWaterLitres: number;
   rccFootingVolumeM3: number;
   rccFootingVolumeCft: number;
+  footingVolumeCft: number;
+  concreteGrade: string;
   rccCementBags: number;
   rccSandCft: number;
   rccAggregateCft: number;
@@ -985,35 +996,52 @@ export interface FootingItemEstimate {
   distSteelKg: number;
   columnStarterSteelKg: number;
   totalSteelKg: number;
+  steelKg: number;
   bindingWireKg: number;
   coverBlocks: number;
   backfillVolumeM3: number;
+  backfillVolumeCft: number;
   totalCost: number;
+  costs: any;
 }
 
 export interface FoundationEstimate {
   totalExcavationM3: number;
+  totalExcavationVolumeM3: number;
+  totalExcavationVolumeCft: number;
   totalSandFillM3: number;
+  totalSandFillVolumeM3: number;
   totalSandFillCft: number;
+  totalSandFillVolumeCft: number;
   totalPccVolumeM3: number;
   totalPccVolumeCft: number;
   totalRccFootingVolumeM3: number;
+  totalFootingVolumeM3: number;
   totalRccFootingVolumeCft: number;
+  totalFootingVolumeCft: number;
   
   // Materials
   cementBags: number;
+  totalCementBags: number;
   cementExactBags: number;
+  totalCementExactBags: number;
   sandM3: number;
   sandCft: number;
+  totalSandCft: number;
   aggregateM3: number;
   aggregateCft: number;
+  totalAggregateCft: number;
   waterLitres: number;
   steelKg: number;
+  totalSteelKg: number;
   steelTonnes: number;
   bindingWireKg: number;
+  totalBindingWireKg: number;
   coverBlocks: number;
+  totalCoverBlocks: number;
   backfillVolumeM3: number;
   dpcAreaM2: number;
+  dpcAreaSqM: number;
   dpcAreaSqFt: number;
   
   recommendedPurchase: {
@@ -1023,13 +1051,17 @@ export interface FoundationEstimate {
     steelKg: number;
     bindingWireKg: number;
     coverBlocks: number;
+    sandFillCft: number;
   };
   
   costs: {
     excavation: number;
     sandFill: number;
     pcc: number;
+    pccLabour: number;
     rccFooting: number;
+    footingLabour: number;
+    dpc: number;
     cement: number;
     sand: number;
     aggregate: number;
@@ -1048,6 +1080,8 @@ export interface FoundationEstimate {
   };
   
   footings: FootingItemEstimate[];
+  items: FootingItemEstimate[];
+  footingCount: number;
 }
 
 export interface CalculatorSettings {
@@ -1803,16 +1837,21 @@ export const calculateFootingRcc = (
     pillarName: footing.pillarName,
     position: footing.position,
     excavationVolumeM3,
+    excavationVolumeCft: excavationVolumeM3 * 35.3147,
     sandFillVolumeM3,
     sandFillCft,
+    sandFillVolumeCft: sandFillCft,
     pccVolumeM3,
     pccVolumeCft,
+    pccMixRatio: pccRatioStr,
     pccCementBags,
     pccSandCft,
     pccAggregateCft,
     pccWaterLitres,
     rccFootingVolumeM3,
     rccFootingVolumeCft,
+    footingVolumeCft: rccFootingVolumeCft,
+    concreteGrade: footing.concreteGrade || 'M20',
     rccCementBags,
     rccSandCft,
     rccAggregateCft,
@@ -1821,10 +1860,19 @@ export const calculateFootingRcc = (
     distSteelKg,
     columnStarterSteelKg: starterSteelKg,
     totalSteelKg,
+    steelKg: totalSteelKg,
     bindingWireKg,
     coverBlocks,
     backfillVolumeM3,
-    totalCost
+    backfillVolumeCft: backfillVolumeM3 * 35.3147,
+    totalCost,
+    costs: {
+      excavation: costExc,
+      sandFill: costSandFill,
+      pcc: costPcc,
+      rccFooting: costFooting,
+      total: totalCost
+    }
   };
 };
 
@@ -2006,32 +2054,52 @@ export const calculateFoundationEstimate = (
 
   return {
     totalExcavationM3,
+    totalExcavationVolumeM3: totalExcavationM3,
+    totalExcavationVolumeCft: totalExcavationM3 * 35.3147,
     totalSandFillM3,
+    totalSandFillVolumeM3: totalSandFillM3,
     totalSandFillCft,
+    totalSandFillVolumeCft: totalSandFillCft,
     totalPccVolumeM3,
     totalPccVolumeCft,
     totalRccFootingVolumeM3,
+    totalFootingVolumeM3: totalRccFootingVolumeM3,
     totalRccFootingVolumeCft,
+    totalFootingVolumeCft: totalRccFootingVolumeCft,
     cementBags,
+    totalCementBags: cementBags,
     cementExactBags,
+    totalCementExactBags: cementExactBags,
     sandM3,
     sandCft,
+    totalSandCft: sandCft,
     aggregateM3,
     aggregateCft,
+    totalAggregateCft: aggregateCft,
     waterLitres,
     steelKg,
+    totalSteelKg: steelKg,
     steelTonnes,
     bindingWireKg,
+    totalBindingWireKg: bindingWireKg,
     coverBlocks,
+    totalCoverBlocks: coverBlocks,
     backfillVolumeM3,
     dpcAreaM2,
+    dpcAreaSqM: dpcAreaM2,
     dpcAreaSqFt,
-    recommendedPurchase,
+    recommendedPurchase: {
+      ...recommendedPurchase,
+      sandFillCft: Math.ceil(totalSandFillCft)
+    },
     costs: {
       excavation: costExc,
       sandFill: costSandFill,
       pcc: (totalPccVolumeM3 * 1.54 * 0.08 * cementPrice) + (totalPccVolumeM3 * 1.54 * 0.33 * 35.3147 * sandRate) + (totalPccVolumeM3 * 1.54 * 0.67 * 35.3147 * aggPrice) + costPccLabour,
+      pccLabour: costPccLabour,
       rccFooting: costCement + costSand + costAgg + costSteel + costWire + costCover + costFootingLabour,
+      footingLabour: costFootingLabour,
+      dpc: 0,
       cement: costCement,
       sand: costSand,
       aggregate: costAgg,
@@ -2041,7 +2109,9 @@ export const calculateFoundationEstimate = (
       labour: labourBreakdown,
       total: totalCost
     },
-    footings: footingEstimates
+    footings: footingEstimates,
+    items: footingEstimates,
+    footingCount: footingEstimates.length
   };
 };
 
@@ -2456,6 +2526,7 @@ export interface Floor {
   unit: Unit;
   externalWalls: Wall[];
   internalWalls: Wall[];
+  rooms?: any[];
   stairs?: Staircase[];
   pillars?: Pillar[];
   ringBeam?: RCCRingBeamConfig;

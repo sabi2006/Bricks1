@@ -776,8 +776,8 @@ Please contact me.`;
       })()}
 
       {/* Ground Floor Foundation & Sub-grade Construction Estimate */}
-      {computedResult.foundationEstimate && computedResult.foundationEstimate.footingCount > 0 && (() => {
-        const fnd = computedResult.foundationEstimate;
+      {computedResult.foundationEstimate && (computedResult.foundationEstimate.footingCount ?? 0) > 0 && (() => {
+        const fnd = computedResult.foundationEstimate!;
 
         return (
           <div className="bg-white rounded-xl shadow-md border border-amber-200 overflow-hidden mt-8">
@@ -1111,7 +1111,7 @@ Please contact me.`;
                   <td className="py-3 pl-4 text-right font-bold text-orange-400">₹{Math.round(computedResult.rccProjectEstimate.costs.total).toLocaleString('en-IN')}</td>
                 </tr>
               )}
-              {computedResult.foundationEstimate && computedResult.foundationEstimate.footingCount > 0 && (
+              {computedResult.foundationEstimate && (computedResult.foundationEstimate.footingCount ?? 0) > 0 && (
                 <tr className="bg-amber-950/40 font-semibold text-amber-400">
                   <td className="py-3 pr-4">Ground Floor Foundation / Base (PCC + RCC Footings)</td>
                   <td className="py-3 px-4 text-right">{computedResult.foundationEstimate.footingCount}</td>
