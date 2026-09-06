@@ -1,0 +1,282 @@
+================================================================================
+                      BRICK FACTORY - COMPLETE PROJECT DOCUMENTATION
+================================================================================
+Generated Date : 2026-08-27
+Project Name   : Brick Factory (Web-Based 3D Brick Calculator & Management Platform)
+Platform       : Web Application (Next.js 16 / React 19 / Three.js / TypeScript / Tailwind CSS)
+Root Directory : D:\Bricks - Copy\brick-factory
+
+================================================================================
+1. PROJECT OVERVIEW & PURPOSE
+================================================================================
+
+Brick Factory is a modern, high-performance web application designed for the 
+construction industry, civil engineers, building contractors, architects, and 
+individual home builders. 
+
+Traditional brick estimation involves complex manual calculations prone to human 
+error, leading to material shortages or costly over-purchasing. Brick Factory 
+solves this problem by providing:
+1. Automated & Highly Accurate Estimation Engine: Computes exact brick counts, 
+   mortar requirements, cement bags, sand volume (cft / m3), and total project cost.
+2. Real-Time Interactive 3D Visualization: Uses WebGL / Three.js to render the 
+   exact structure with custom wall dimensions, doors, windows, and ventilators.
+3. Complete E-Commerce & Bulk Order Ecosystem: Browse brick varieties, check 
+   specifications, place bulk inquiries, and calculate logistics seamlessly.
+4. AI-Powered Visual Estimation: Upload architectural sketches or blueprints to 
+   extract dimensions and generate instant material estimates.
+
+--------------------------------------------------------------------------------
+2. KEY FEATURES & VALUE PROPOSITION
+--------------------------------------------------------------------------------
+
+[A] Dynamic 3D Structure Preview:
+    - Real-time WebGL rendering of single walls, multi-wall rooms, and bathrooms.
+    - Uses Three.js `InstancedMesh` to render thousands of individual bricks smoothly 
+      at 60 FPS without browser lag.
+    - Interactive camera controls (Orbit, Pan, Zoom, Reset view).
+    - Camera view presets: Isometric, Front, Top, Left, Right views.
+    - Wireframe mode toggle and dimension overlay indicators.
+    - Real-time door, window, and ventilator cutout subtractions from brick count.
+
+[B] Advanced Material & Cost Calculation Engine:
+    - Custom brick dimensions (Standard Indian Red Clay, Modular, Fly Ash, AAC Blocks, etc.).
+    - Mortar thickness adjustment (10mm to 15mm standard).
+    - Mortar mix ratios (1:3, 1:4, 1:5, 1:6 cement-to-sand ratios).
+    - Wastage percentage factor (typically 5% - 10%).
+    - Plastering calculations (Single side / Double side mortar requirement).
+    - Cost breakdown: Brick cost + Cement cost + Sand cost + Labor estimation.
+
+[C] Multi-Wall & Room Layout Builder:
+    - Support for Single Wall, 4-Wall Rooms, L-Shaped Walls, and Bathroom units.
+    - Dynamic placement of openings on specific walls (Front, Right, Back, Left).
+    - Accurate wall overlap deductions at room corners to prevent over-counting.
+
+[D] Product Catalog & Detailed Specifications:
+    - Comprehensive brick catalog featuring:
+        * Premium Wirecut Red Clay Bricks
+        * High-Strength Fly Ash Bricks
+        * Autoclaved Aerated Concrete (AAC) Lightweight Blocks
+        * Heavy-Duty Concrete Paver Blocks
+        * Interlocking Soil Stabilized Blocks
+        * Refractory Fire Bricks
+    - Detailed technical parameters: Compressive Strength (N/mm2), Water Absorption %, 
+      Thermal Conductivity, Density, Weight, Dimensions, and Pricing.
+
+[E] Bulk Order & B2B Inquiry System:
+    - Dedicated inquiry form for large construction projects, builders, and developers.
+    - Automated email notification system powered by Nodemailer.
+    - Captures project location, required quantity, site delivery requirements, 
+      and timeline.
+
+[F] AI Visual Estimator:
+    - Upload construction drawings, hand-drawn floor plans, or wall photos.
+    - Visual feedback with step-by-step breakdown of detected dimensions.
+
+[G] Ultra-Smooth UI & Modern Aesthetics:
+    - Smooth inertia scrolling via Lenis.
+    - Rich micro-animations with Framer Motion.
+    - Tailwind CSS v4 design with rich dark/light tones, glassmorphism, and responsive layout.
+
+================================================================================
+3. COMPLETE TECHNOLOGY STACK
+================================================================================
+
+[Frontend Framework & Core]
+- Next.js (v16.3.1)       : App Router, Server Components, API Route Handlers
+- React (v19.2.8)         : Modern React with Hooks and Concurrent Features
+- TypeScript (v5)         : Strict type-safety across models, calculators, and UI
+
+[3D Graphics & Rendering]
+- Three.js (v0.185.1)     : WebGL 3D rendering engine
+- @react-three/fiber      : Declarative React wrapper for Three.js scene graph
+- @react-three/drei       : Production-ready helpers (OrbitControls, ContactShadows, Html)
+
+[Styling & Animations]
+- Tailwind CSS (v4)       : Modern utility-first CSS engine
+- Framer Motion (v13.1.0) : Physics-based UI animations, page transitions, and gestures
+- Lucide React (v1.31.0)  : Modern icon library
+- @studio-freight/lenis   : Smooth momentum scrolling
+
+[Backend, Database & Email]
+- Prisma ORM (v5.22.0)    : Type-safe database client and migration tool
+- PostgreSQL              : Relational database for Users, Products, Orders, Reviews
+- Nodemailer (v9.0.5)     : SMTP mailer for order inquiries and notifications
+
+================================================================================
+4. PROJECT DIRECTORY & FILE STRUCTURE
+================================================================================
+
+d:\Bricks - Copy\brick-factory\
+├── prisma\
+│   └── schema.prisma                  --> Database schema (User, Product, Cart, Order, Review)
+├── public\                            --> Static assets, images, icons, and textures
+├── src\
+│   ├── app\                           --> Next.js App Router
+│   │   ├── about\
+│   │   │   └── page.tsx               --> About Company, Quality Standards & Vision
+│   │   ├── api\
+│   │   │   └── bulk-orders\
+│   │   │       └── route.ts           --> API endpoint handling bulk order emails & storage
+│   │   ├── bulk-orders\
+│   │   │   └── page.tsx               --> Bulk order submission page & pricing estimator
+│   │   ├── calculator\
+│   │   │   └── page.tsx               --> Full-page dedicated 3D Brick & Material Calculator
+│   │   ├── products\
+│   │   │   ├── [id]\
+│   │   │   │   └── page.tsx           --> Dynamic single product details & technical spec page
+│   │   │   └── page.tsx               --> Product catalog grid with filters & comparisons
+│   │   ├── globals.css                --> Global styles, custom scrollbar & Tailwind setup
+│   │   ├── layout.tsx                 --> Root layout with Navbar, Footer & SmoothScroll
+│   │   └── page.tsx                   --> High-converting landing page with 3D Hero & interactive sections
+│   │
+│   ├── components\
+│   │   ├── 3d\                        --> Three.js / React Three Fiber 3D Canvas Components
+│   │   │   ├── BrickScene.tsx         --> 3D interactive wall renderer with lighting & textures
+│   │   │   ├── Hero3DScene.tsx        --> Interactive floating 3D brick showcase for Hero banner
+│   │   │   ├── ScrollStoryScene.tsx   --> Scroll-driven 3D animation scene
+│   │   │   ├── SharedBrickWall.tsx    --> Reusable 3D brick wall mesh generator
+│   │   │   └── VisualEstimator3D.tsx  --> Full 3D room/wall simulation with cutouts & controls
+│   │   │
+│   │   ├── calculator\                --> Calculator logic & UI component widgets
+│   │   │   ├── AIAnalysisResults.tsx  --> Visual display of AI-detected dimensions
+│   │   │   ├── BuildingEditor.tsx     --> Interactive room builder, wall dimension controls
+│   │   │   ├── CalculatorContext.tsx  --> React Context for cross-component calculation state
+│   │   │   ├── CalculatorSettings.tsx --> Settings modal for mortar ratio, brick size, wastage %
+│   │   │   ├── ImageUpload.tsx        --> Drag-and-drop blueprint/sketch uploader
+│   │   │   ├── ProjectForms.tsx       --> Structure dimension input forms (Single, Room, Bathroom)
+│   │   │   ├── ResultDashboard.tsx    --> Metric cards for brick count, cement bags, sand, cost
+│   │   │   ├── StructurePreview3D.tsx --> 3D wrapper with view controls & wireframe toggles
+│   │   │   ├── VisualEstimator.tsx    --> Main estimator wrapper
+│   │   │   ├── VisualEstimatorResults.tsx --> Comprehensive cost & quantity analytical breakdown
+│   │   │   └── VisualPreviews.tsx     --> 2D architectural elevation previews
+│   │   │
+│   │   ├── home\
+│   │   │   └── AIVisualEstimatePromoSection.tsx --> Landing page promo section for AI estimator
+│   │   │
+│   │   └── layout\
+│   │       ├── Footer.tsx             --> Footer with quick links, contacts, social links
+│   │       ├── Navbar.tsx             --> Sticky responsive navigation with active states & mobile drawer
+│   │       └── SmoothScroll.tsx       --> Lenis smooth scrolling provider
+│   │
+│   └── lib\
+│       ├── brickCalculator.ts         --> Core mathematical engine for brick & mortar calculations
+│       ├── brickCalculator.test.ts    --> Unit test suites for estimation accuracy
+│       └── utils.ts                   --> Helper utilities (clsx & twMerge wrapper)
+│
+├── .env.example                       --> Environment variable template
+├── next.config.ts                     --> Next.js build configuration
+├── package.json                       --> Dependencies and build scripts
+├── tsconfig.json                      --> TypeScript configuration
+└── README.md                          --> Project quickstart guide
+
+================================================================================
+5. MATHEMATICAL FORMULAS & CALCULATION ENGINE (src/lib/brickCalculator.ts)
+================================================================================
+
+1. Net Wall Volume Calculation:
+   - Gross Wall Volume = Wall Length × Wall Height × Wall Thickness
+   - Total Deductions = Sum of (Opening Width × Opening Height × Wall Thickness) for all doors/windows
+   - Net Wall Volume = Gross Wall Volume - Total Deductions
+
+2. Single Brick Volume:
+   - Volume without Mortar = Length × Width × Height
+   - Nominal Volume with Mortar = (Length + MortarThickness) × (Width + MortarThickness) × (Height + MortarThickness)
+
+3. Number of Bricks Required:
+   - Base Bricks = Net Wall Volume / Nominal Brick Volume
+   - Total Bricks with Wastage = Base Bricks × (1 + WastagePercentage / 100)
+
+4. Mortar Quantity & Material Breakdown:
+   - Total Mortar Volume = Net Wall Volume - (Base Bricks × Single Brick Volume without Mortar)
+   - Dry Mortar Volume = Wet Mortar Volume × 1.33 (33% conversion factor for dry volume)
+   - For a Mortar Mix Ratio (e.g., 1:6 = Cement:Sand, Total Parts = 7):
+       * Cement Volume = Dry Mortar Volume × (1 / 7)
+       * Cement Bags Required = (Cement Volume in m3 × 1440 kg/m3) / 50 kg per bag
+       * Sand Volume in m3 = Dry Mortar Volume × (6 / 7)
+       * Sand Volume in cft = Sand Volume in m3 × 35.3147
+
+5. Cost Estimation:
+   - Total Cost = (Total Bricks × Price Per Brick) + (Cement Bags × Price Per Bag) + (Sand cft × Price Per cft) + Estimated Labor
+
+================================================================================
+6. DATABASE SCHEMA & DATA MODELS (Prisma PostgreSQL)
+================================================================================
+
+1. User Model:
+   - Fields: id, email, password, name, role (CUSTOMER, ADMIN, STAFF), createdAt, updatedAt
+   - Relations: orders, cart, reviews
+
+2. Product Model:
+   - Fields: id, name, code, description, price, stock, minStock, material, strength, categoryId
+   - Relations: category, images, cartItems, orderItems, reviews
+
+3. Category Model:
+   - Fields: id, name, description
+   - Relations: products
+
+4. Cart & CartItem Models:
+   - Fields: id, userId, cartId, productId, quantity, createdAt, updatedAt
+   - Manages live customer cart items.
+
+5. Order & OrderItem Models:
+   - Fields: id, userId, status (PENDING, CONFIRMED, MANUFACTURING, READY, DELIVERING, DELIVERED, CANCELLED), 
+     totalAmount, paymentStatus (PENDING, PAID, FAILED, REFUNDED), createdAt, updatedAt
+   - Tracks order fulfillment lifecycle and product snapshots.
+
+6. Review Model:
+   - Fields: id, rating (1-5), comment, userId, productId, createdAt
+
+================================================================================
+7. STEP-BY-STEP SETUP & EXECUTION GUIDE
+================================================================================
+
+[Prerequisites]
+- Node.js (v18.18+ or v20+ recommended)
+- npm or yarn or pnpm
+- PostgreSQL database instance (optional for local calculator preview, required for DB features)
+
+[Installation Steps]
+1. Navigate to the project root:
+   cd "D:\Bricks - Copy\brick-factory"
+
+2. Install all dependencies:
+   npm install
+
+3. Configure Environment Variables:
+   Copy `.env.example` to `.env` and fill in:
+   - DATABASE_URL="postgresql://user:password@localhost:5432/brick_factory"
+   - SMTP_HOST="smtp.gmail.com"
+   - SMTP_PORT=587
+   - SMTP_USER="your-email@gmail.com"
+   - SMTP_PASS="your-app-password"
+
+4. Database Sync (if using database):
+   npx prisma db push
+   npx prisma generate
+
+5. Run Development Server:
+   npm run dev
+
+6. Open in Browser:
+   http://localhost:3000
+
+7. Build for Production:
+   npm run build
+   npm run start
+
+================================================================================
+8. SUMMARY OF PAGES & URL ROUTES
+================================================================================
+
+- /                    : Landing Page with 3D Hero, Features, Promo & Testimonials
+- /calculator          : Interactive 3D Wall & Room Material Estimator
+- /products            : Product Catalog with specifications & filters
+- /products/[id]       : Individual Product Detail & Quote Request
+- /bulk-orders         : B2B / Contractor Bulk Order Inquiry Form
+- /about               : About Brick Factory, Quality Labs, Sustainable Manufacturing
+- /api/bulk-orders     : API handler for bulk order submissions and email dispatch
+
+================================================================================
+                      END OF PROJECT DOCUMENTATION
+================================================================================

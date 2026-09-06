@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-border: var(--border);
+}
+
+:root {
+  --background: #FAFAF9; /* Off White */
+  --foreground: #111827; /* Charcoal Black */
+  --primary: #F05A00; /* Primary Brick Orange */
+  --primary-foreground: #FFFFFF;
+  --secondary: #A83D27; /* Deep Brick Red */
+  --accent: #F5EEE6; /* Warm Sand */
+  --border: #E5E7EB;
+  --muted: #6B7280; /* Concrete Grey */
+  --success: #16A34A; /* Success Green */
+  --dark-navy: #0F172A;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0F172A; /* Dark Navy */
+    --foreground: #FAFAF9;
+    --primary: #F05A00;
+    --primary-foreground: #FFFFFF;
+    --secondary: #A83D27;
+    --accent: #111827; /* Charcoal Black */
+    --border: #1E293B;
+    --muted: #94A3B8;
+    --success: #16A34A;
+    --dark-navy: #0F172A;
+  }
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+/* Base styles to fix border-border */
+*, ::before, ::after {
+  border-color: var(--border);
+}
+
+input, select, textarea {
+  color: #0f172a;
+}
+
