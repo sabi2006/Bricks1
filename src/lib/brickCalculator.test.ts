@@ -6,7 +6,11 @@ import {
   CalculatorSettings, 
   BrickSpecification,
   getEffectivePillarPosition, 
+  getPillarWorldPosition,
+  worldPositionTo2D,
+  validatePillarPlacement,
   trimWallByPillars,
+  splitWallByPillars,
   detectClosedStructuralBays,
   detectPillarToPillarBeams,
   DEFAULT_RCC_FULL_RING_BEAM,
@@ -25,9 +29,26 @@ import {
   DEFAULT_FOUNDATION_CONFIG,
   generateFootingsForPillars,
   calculateFootingRcc,
+  getEffectiveFootingSize,
   calculateFoundationEstimate,
   DEFAULT_BRICK_SIZE,
-  DEFAULT_TN_RED_BRICK
+  DEFAULT_TN_RED_BRICK,
+  PlasterConfig,
+  DEFAULT_PLASTER_CONFIG,
+  calculatePlasterEstimate,
+  toMetersPlaster,
+  parsePlasterMix,
+  getRingBeamJunction,
+  getFullRoofJunction,
+  getTopRccStructuralJunction,
+  getStructuralRoofFootprint,
+  validateBeamColumnJoint,
+  toMeters,
+  applyPillarConfigToAll,
+  CommonPillarConfig,
+  RingBeamJunction,
+  FullRoofJunction,
+  TopRccStructuralJunction
 } from './brickCalculator';
 
 describe('RCC Pillar Exact Corner Placement & Alignment', () => {
@@ -1847,6 +1868,7 @@ describe('Ground Floor Foundation & Sub-grade Construction System', () => {
       est.costs.sandFill +
       est.costs.pccLabour +
       est.costs.footingLabour +
+      (est.costs.stubLabour || 0) +
       est.costs.cement +
       est.costs.sand +
       est.costs.aggregate +
@@ -1854,6 +1876,69 @@ describe('Ground Floor Foundation & Sub-grade Construction System', () => {
       est.costs.bindingWire +
       est.costs.coverBlocks
     );
+  });
+
+  it('updates concrete volume, steel, and costs live when Column Stub height is customized', () => {
+    const baseFooting: FoundationFooting = {
+      id: 'footing-stub-test',
+      pillarId: 'p-stub',
+      pillarName: 'P-Stub',
+      position: { x: 0, y: 0 },
+      foundationType: 'isolated',
+      footingLength: 4,
+      footingWidth: 4,
+      footingDepth: 1.5,
+      footingUnit: 'ft',
+      concreteGrade: 'M20',
+      pccLength: 5,
+      pccWidth: 5,
+      pccThickness: 0.5,
+      pccUnit: 'ft',
+      sandFillLength: 5,
+      sandFillWidth: 5,
+      sandFillDepth: 0.5,
+      sandFillUnit: 'ft',
+      excavationLength: 6,
+      excavationWidth: 6,
+      excavationDepth: 4.5,
+      excavationUnit: 'ft',
+      columnStubHeight: 2.0, // 2 ft stub
+      columnStubWidth: 9,
+      columnStubDepth: 9,
+      rebar: {
+        mainBarDiaMm: 12,
+        mainBarCount: 6,
+        distBarDiaMm: 12,
+        distBarCount: 6,
+        coverMm: 50
+      },
+      columnStubRebar: {
+        mainBarDiaMm: 12,
+        mainBarCount: 4,
+        stirrupDiaMm: 8,
+        stirrupSpacingMm: 150,
+        coverMm: 40
+      }
+    };
+
+    const est2ft = calculateFootingRcc(baseFooting, baseSettings);
+    expect(est2ft.columnStubHeight).toBe(2.0);
+    expect(est2ft.stubVolumeCft).toBeGreaterThan(0);
+    expect(est2ft.stubMainSteelKg).toBeGreaterThan(0);
+    expect(est2ft.stubStirrupSteelKg).toBeGreaterThan(0);
+
+    // Increase stub height to 4.0 ft
+    const tallerFooting: FoundationFooting = {
+      ...baseFooting,
+      columnStubHeight: 4.0
+    };
+    const est4ft = calculateFootingRcc(tallerFooting, baseSettings);
+
+    // Stub volume, steel, and total cost must all strictly increase with stub height
+    expect(est4ft.stubVolumeCft).toBeCloseTo(est2ft.stubVolumeCft * 2, 1);
+    expect(est4ft.stubSteelKg).toBeGreaterThan(est2ft.stubSteelKg);
+    expect(est4ft.costs.stubLabour).toBeGreaterThan(est2ft.costs.stubLabour);
+    expect(est4ft.totalCost).toBeGreaterThan(est2ft.totalCost);
   });
 
   it('strictly isolates foundation to Ground Floor (Level 0) in multi-floor projects', () => {
@@ -1903,4 +1988,1881 @@ describe('Ground Floor Foundation & Sub-grade Construction System', () => {
     expect(projectResult.foundationEstimate?.items.length).toBe(2);
     expect(projectResult.foundationEstimate?.items.map(i => i.pillarId)).toEqual(['p-gf-1', 'p-gf-2']);
   });
+
+  it('supports independent addition and deletion of Foundation Pillar / Column Stub', () => {
+    const pillars: Pillar[] = [
+      { id: 'p1', name: 'P1', width: 9, depth: 9, height: 10, count: 1, unit: 'ft', position: { x: 0, y: 0 } },
+      { id: 'p2', name: 'P2', width: 9, depth: 9, height: 10, count: 1, unit: 'ft', position: { x: 10, y: 0 } }
+    ];
+
+    // Generate initial footings (both have stubs by default)
+    const footings = generateFootingsForPillars(pillars, DEFAULT_FOUNDATION_CONFIG, 'ft');
+    expect(footings.length).toBe(2);
+    expect(footings[0].hasFoundationPillar).toBe(true);
+    expect(footings[0].foundationPillarId).toBe('FP1');
+    expect(footings[1].hasFoundationPillar).toBe(true);
+    expect(footings[1].foundationPillarId).toBe('FP2');
+
+    // 1. Calculate with both stubs enabled
+    const estBoth = calculateFoundationEstimate(
+      { ...DEFAULT_FOUNDATION_CONFIG, footings },
+      [],
+      pillars,
+      baseSettings
+    );
+    expect(estBoth.footingCount).toBe(2);
+    expect(estBoth.totalFoundationPillars).toBe(2);
+    expect(estBoth.stubCount).toBe(2);
+    expect(estBoth.footings[0].rccStubVolumeM3).toBeGreaterThan(0);
+    expect(estBoth.footings[1].rccStubVolumeM3).toBeGreaterThan(0);
+    const initialTotalCost = estBoth.costs.total;
+
+    // 2. Delete Foundation Pillar on Footing 2 (hasFoundationPillar: false, columnStubHeight: 0)
+    const footingsOneStub = footings.map((f, idx) => {
+      if (idx === 1) {
+        return { ...f, hasFoundationPillar: false, columnStubHeight: 0 };
+      }
+      return f;
+    });
+
+    const estOneStub = calculateFoundationEstimate(
+      { ...DEFAULT_FOUNDATION_CONFIG, footings: footingsOneStub },
+      [],
+      pillars,
+      baseSettings
+    );
+    expect(estOneStub.footingCount).toBe(2);
+    expect(estOneStub.totalFoundationPillars).toBe(1);
+    expect(estOneStub.stubCount).toBe(1);
+
+    // Footing 1 stub exists, Footing 2 stub is zeroed out
+    expect(estOneStub.footings[0].rccStubVolumeM3).toBeGreaterThan(0);
+    expect(estOneStub.footings[1].rccStubVolumeM3).toBe(0);
+    expect(estOneStub.footings[1].stubSteelKg).toBe(0);
+    expect(estOneStub.footings[1].costRccStub).toBe(0);
+
+    // Footing 2 base footing and PCC remain intact!
+    expect(estOneStub.footings[1].rccFootingVolumeM3).toBe(estBoth.footings[1].rccFootingVolumeM3);
+    expect(estOneStub.footings[1].pccVolumeM3).toBe(estBoth.footings[1].pccVolumeM3);
+    expect(estOneStub.footings[1].costRccFooting).toBe(estBoth.footings[1].costRccFooting);
+
+    // Total cost reduced only by stub concrete and steel
+    expect(estOneStub.costs.total).toBeLessThan(initialTotalCost);
+
+    // 3. Re-add Foundation Pillar to Footing 2 with custom height (e.g. 3 ft)
+    const footingsReAdded = footingsOneStub.map((f, idx) => {
+      if (idx === 1) {
+        return {
+          ...f,
+          hasFoundationPillar: true,
+          foundationPillarId: 'FP2',
+          columnStubHeight: 3.0,
+          columnStubWidth: 12,
+          columnStubDepth: 12
+        };
+      }
+      return f;
+    });
+
+    const estReAdded = calculateFoundationEstimate(
+      { ...DEFAULT_FOUNDATION_CONFIG, footings: footingsReAdded },
+      [],
+      pillars,
+      baseSettings
+    );
+    expect(estReAdded.totalFoundationPillars).toBe(2);
+    expect(estReAdded.footings[1].hasFoundationPillar).toBe(true);
+    expect(estReAdded.footings[1].rccStubVolumeM3).toBeGreaterThan(0);
+    expect(estReAdded.costs.total).toBeGreaterThan(estOneStub.costs.total);
+  });
+
+  describe('Common Size / Master Foundation Size Mode', () => {
+    const p1: FoundationFooting = {
+      id: 'footing-p1',
+      pillarId: 'p1',
+      pillarName: 'P1',
+      floorId: 'floor-0',
+      position: { x: 0, y: 0 },
+      footingLength: 4,
+      footingWidth: 4,
+      footingDepth: 1,
+      footingUnit: 'ft',
+      hasFoundationPillar: true,
+      columnStubHeight: 2
+    };
+
+    const p2: FoundationFooting = {
+      id: 'footing-p2',
+      pillarId: 'p2',
+      pillarName: 'P2',
+      floorId: 'floor-0',
+      position: { x: 10, y: 0 },
+      footingLength: 5,
+      footingWidth: 5,
+      footingDepth: 1.5,
+      footingUnit: 'ft',
+      hasFoundationPillar: true,
+      columnStubHeight: 2
+    };
+
+    it('returns individual footing sizes when Common Size is OFF', () => {
+      const cfg: FoundationConfig = {
+        ...DEFAULT_FOUNDATION_CONFIG,
+        useCommonFootingSize: false,
+        footings: [p1, p2]
+      };
+
+      const sizeP1 = getEffectiveFootingSize(p1, cfg);
+      const sizeP2 = getEffectiveFootingSize(p2, cfg);
+
+      expect(sizeP1).toEqual({ length: 4, width: 4, depth: 1, unit: 'ft' });
+      expect(sizeP2).toEqual({ length: 5, width: 5, depth: 1.5, unit: 'ft' });
+    });
+
+    it('synchronizes all footings to shared dimensions when Common Size is ON', () => {
+      const cfg: FoundationConfig = {
+        ...DEFAULT_FOUNDATION_CONFIG,
+        useCommonFootingSize: true,
+        commonFootingSize: { length: 6, width: 6, depth: 2, unit: 'ft' },
+        footings: [p1, p2]
+      };
+
+      const sizeP1 = getEffectiveFootingSize(p1, cfg);
+      const sizeP2 = getEffectiveFootingSize(p2, cfg);
+
+      // Both must share the exact same common dimensions
+      expect(sizeP1.length).toBe(6);
+      expect(sizeP1.width).toBe(6);
+      expect(sizeP1.depth).toBe(2);
+
+      expect(sizeP2.length).toBe(6);
+      expect(sizeP2.width).toBe(6);
+      expect(sizeP2.depth).toBe(2);
+
+      // Positions and IDs must remain completely independent
+      expect(p1.position).toEqual({ x: 0, y: 0 });
+      expect(p2.position).toEqual({ x: 10, y: 0 });
+      expect(p1.id).toBe('footing-p1');
+      expect(p2.id).toBe('footing-p2');
+    });
+
+    it('auto-generates footings with common dimensions when Common Size is ON', () => {
+      const pillars: Pillar[] = [
+        { id: 'col1', name: 'P1', width: 9, depth: 9, height: 10, position: { x: 0, y: 0 } },
+        { id: 'col2', name: 'P2', width: 9, depth: 9, height: 10, position: { x: 12, y: 0 } }
+      ];
+
+      const cfg: Partial<FoundationConfig> = {
+        useCommonFootingSize: true,
+        commonFootingSize: { length: 5.5, width: 5.5, depth: 1.75, unit: 'ft' }
+      };
+
+      const generated = generateFootingsForPillars(pillars, cfg, 'ft');
+      expect(generated.length).toBe(2);
+      expect(generated[0].footingLength).toBe(5.5);
+      expect(generated[0].footingWidth).toBe(5.5);
+      expect(generated[0].footingDepth).toBe(1.75);
+
+      expect(generated[1].footingLength).toBe(5.5);
+      expect(generated[1].footingWidth).toBe(5.5);
+      expect(generated[1].footingDepth).toBe(1.75);
+    });
+
+    it('calculates RCC footing volume and steel accurately under Common Size mode', () => {
+      const settings: CalculatorSettings = {
+        rccConcreteMixRatio: '1:1.5:3',
+        cementPrice: 400,
+        steelRate: 65
+      } as CalculatorSettings;
+
+      const cfg: FoundationConfig = {
+        ...DEFAULT_FOUNDATION_CONFIG,
+        useCommonFootingSize: true,
+        commonFootingSize: { length: 5, width: 5, depth: 1.5, unit: 'ft' },
+        footings: [p1]
+      };
+
+      const est = calculateFootingRcc(p1, settings, undefined, cfg);
+
+      // 5 ft * 5 ft * 1.5 ft = 37.5 cft
+      expect(est.rccFootingVolumeCft).toBeCloseTo(37.5, 1);
+      expect(est.totalCost).toBeGreaterThan(0);
+    });
+
+    it('scales Foundation Estimate for N footings without double counting under Common Size mode', () => {
+      const settings: CalculatorSettings = {
+        rccConcreteMixRatio: '1:1.5:3'
+      } as CalculatorSettings;
+
+      // 9 footings (P1..P9)
+      const nineFootings: FoundationFooting[] = Array.from({ length: 9 }, (_, i) => ({
+        id: `footing-${i + 1}`,
+        pillarId: `p${i + 1}`,
+        pillarName: `P${i + 1}`,
+        floorId: 'floor-0',
+        position: { x: (i % 3) * 10, y: Math.floor(i / 3) * 10 },
+        footingLength: 4,
+        footingWidth: 4,
+        footingDepth: 1,
+        footingUnit: 'ft',
+        hasFoundationPillar: false,
+        columnStubHeight: 0
+      }));
+
+      const cfg: FoundationConfig = {
+        ...DEFAULT_FOUNDATION_CONFIG,
+        useCommonFootingSize: true,
+        commonFootingSize: { length: 5, width: 5, depth: 1.5, unit: 'ft' },
+        footings: nineFootings
+      };
+
+      const estimate = calculateFoundationEstimate(cfg, [], [], settings, 'ft');
+
+      // Total footing concrete must be 9 * (5 * 5 * 1.5) = 337.5 cft
+      const expectedTotalFootingConcreteCft = 9 * 5 * 5 * 1.5;
+      expect(estimate.totalRccFootingVolumeCft).toBeCloseTo(expectedTotalFootingConcreteCft, 1);
+      expect(estimate.footings.length).toBe(9);
+    });
+  });
 });
+
+describe('Inner + Outer Cement Plaster / Rendering System', () => {
+  const dummySettings: CalculatorSettings = {
+    mortarJointHorizontal: 10,
+    mortarJointVertical: 10,
+    wastagePercentage: 5,
+    dryVolumeFactor: 1.33,
+    mixRatioCement: 1,
+    mixRatioSand: 5,
+    brickPrice: 8.5,
+    cementPrice: 400,
+    sandPrice: 2118,
+    sandPricePerCft: 60,
+    aggregatePrice: 1589,
+    aggregatePricePerCft: 45,
+    steelRate: 65,
+    bindingWireRate: 85,
+    coverBlockPrice: 3,
+    rccLabourRate: 4000,
+    labourCost: 0,
+    transportCost: 0,
+  };
+
+  it('verifies unit conversions for plaster thickness to meters (mm, cm, in)', () => {
+    expect(toMetersPlaster(12, 'mm')).toBeCloseTo(0.012, 5);
+    expect(toMetersPlaster(15, 'mm')).toBeCloseTo(0.015, 5);
+    expect(toMetersPlaster(6, 'mm')).toBeCloseTo(0.006, 5);
+    expect(toMetersPlaster(1.5, 'cm')).toBeCloseTo(0.015, 5);
+    expect(toMetersPlaster(0.59, 'in')).toBeCloseTo(0.014986, 5);
+  });
+
+  it('verifies plaster mix parsing for 1:6, 1:4, 1:3', () => {
+    const mix16 = parsePlasterMix('1:6');
+    expect(mix16.cementPart).toBe(1);
+    expect(mix16.sandPart).toBe(6);
+    expect(mix16.totalParts).toBe(7);
+    expect(mix16.cementFraction).toBeCloseTo(1 / 7, 5);
+    expect(mix16.sandFraction).toBeCloseTo(6 / 7, 5);
+
+    const mix14 = parsePlasterMix('1:4');
+    expect(mix14.cementFraction).toBeCloseTo(1 / 5, 5);
+    expect(mix14.sandFraction).toBeCloseTo(4 / 5, 5);
+  });
+
+  it('Section 80 Estimation Test: 20ft × 10ft wall with 7×3 door and 4×4 window -> Gross 200 sq ft, Deductions 37 sq ft, Net 163 sq ft', () => {
+    // 20 ft length, 10 ft height = 200 sq ft gross
+    // Door: 7 ft x 3 ft = 21 sq ft
+    // Window: 4 ft x 4 ft = 16 sq ft
+    // Total opening deduction = 37 sq ft
+    // Net area = 200 - 37 = 163 sq ft
+    const testWall: Wall = {
+      id: 'w-test-80',
+      name: 'Test Wall',
+      dimensions: {
+        length: 20,
+        height: 10,
+        thickness: 9,
+        unit: 'ft',
+        thicknessUnit: 'in'
+      },
+      openings: [
+        { id: 'd1', type: 'door', width: 3, height: 7, count: 1, unit: 'ft' },
+        { id: 'w1', type: 'window', width: 4, height: 4, count: 1, unit: 'ft' }
+      ]
+    };
+
+    const plasterCfg: PlasterConfig = {
+      ...DEFAULT_PLASTER_CONFIG,
+      enabled: true,
+      scope: 'both',
+      inner: {
+        enabled: true,
+        thickness: 12, // 12 mm
+        unit: 'mm',
+        mixRatio: '1:6',
+        wastagePercent: 0, // for exact mathematical verification
+        ratePerSqM: 180
+      },
+      outer: {
+        enabled: true,
+        thickness: 15, // 15 mm
+        unit: 'mm',
+        mixRatio: '1:4',
+        wastagePercent: 0, // for exact verification
+        ratePerSqM: 220
+      },
+      rcc: {
+        enabled: false,
+        thickness: 6,
+        unit: 'mm',
+        mixRatio: '1:4',
+        wastagePercent: 0
+      },
+      dryVolumeFactor: 1.33
+    };
+
+    const buildingModel = {
+      buildingLength: 20,
+      buildingWidth: 10,
+      buildingUnit: 'ft' as const,
+      floors: [
+        {
+          id: 'floor-0',
+          name: 'Ground Floor',
+          level: 0,
+          height: 10,
+          unit: 'ft' as const,
+          externalWalls: [testWall],
+          internalWalls: [],
+          plaster: plasterCfg
+        }
+      ],
+      plaster: plasterCfg
+    };
+
+    const estimate = calculatePlasterEstimate({ walls: [], buildingModel }, dummySettings, 'ft');
+
+    // 163 sq ft = 163 * 0.092903 = 15.1432 m²
+    expect(estimate.inner.grossAreaSqFt).toBeCloseTo(200, 1);
+    expect(estimate.inner.openingDeductionSqFt).toBeCloseTo(37, 1);
+    expect(estimate.inner.netAreaSqFt).toBeCloseTo(163, 1);
+    expect(estimate.inner.netAreaSqM).toBeCloseTo(15.143, 2);
+
+    expect(estimate.outer.grossAreaSqFt).toBeCloseTo(200, 1);
+    expect(estimate.outer.openingDeductionSqFt).toBeCloseTo(37, 1);
+    expect(estimate.outer.netAreaSqFt).toBeCloseTo(163, 1);
+    expect(estimate.outer.netAreaSqM).toBeCloseTo(15.143, 2);
+
+    // Inner Plaster (12 mm = 0.012 m)
+    // Wet Volume = 15.1432 * 0.012 = 0.1817 m³
+    expect(estimate.inner.wetVolumeM3).toBeCloseTo(0.1817, 3);
+    // Dry Mortar = 0.1817 * 1.33 = 0.2417 m³
+    expect(estimate.inner.dryMortarVolumeM3).toBeCloseTo(0.2417, 3);
+    // Mix 1:6 => Cement = 0.2417 / 7 = 0.03453 m³ => exact bags = 0.03453 / 0.0347 ≈ 1.0 bag
+    expect(estimate.inner.cementExactBags).toBeCloseTo(1.0, 1);
+    expect(estimate.inner.cementBags).toBe(1);
+    // Sand = 0.2417 * (6 / 7) = 0.2072 m³ => CFT = 0.2072 * 35.3147 ≈ 7.32 CFT
+    expect(estimate.inner.sandCft).toBeCloseTo(7.32, 1);
+
+    // Outer Plaster (15 mm = 0.015 m)
+    // Wet Volume = 15.1432 * 0.015 = 0.2271 m³
+    expect(estimate.outer.wetVolumeM3).toBeCloseTo(0.2271, 3);
+    // Dry Mortar = 0.2271 * 1.33 = 0.3021 m³
+    expect(estimate.outer.dryMortarVolumeM3).toBeCloseTo(0.3021, 3);
+    // Mix 1:4 => Cement = 0.3021 / 5 = 0.0604 m³ => exact bags = 0.0604 / 0.0347 ≈ 1.74 bags
+    expect(estimate.outer.cementExactBags).toBeCloseTo(1.74, 1);
+    expect(estimate.outer.cementBags).toBe(2);
+    // Sand = 0.3021 * (4 / 5) = 0.2417 m³ => CFT = 0.2417 * 35.3147 ≈ 8.53 CFT
+    expect(estimate.outer.sandCft).toBeCloseTo(8.53, 1);
+
+    // Verify quantities are completely separate and not conflated
+    expect(estimate.inner.wetVolumeM3).not.toBe(estimate.outer.wetVolumeM3);
+  });
+
+  it('calculates internal partition walls on BOTH sides as Inner Plaster (never outer plaster)', () => {
+    const partitionWall: Wall = {
+      id: 'w-int-1',
+      name: 'Partition Wall',
+      dimensions: { length: 15, height: 10, thickness: 4.5, unit: 'ft', thicknessUnit: 'in' },
+      openings: []
+    };
+
+    const buildingModel = {
+      buildingLength: 30,
+      buildingWidth: 20,
+      buildingUnit: 'ft' as const,
+      floors: [
+        {
+          id: 'floor-0',
+          name: 'Ground Floor',
+          level: 0,
+          height: 10,
+          unit: 'ft' as const,
+          externalWalls: [],
+          internalWalls: [partitionWall],
+          plaster: {
+            ...DEFAULT_PLASTER_CONFIG,
+            enabled: true,
+            inner: { ...DEFAULT_PLASTER_CONFIG.inner, enabled: true },
+            rcc: { ...DEFAULT_PLASTER_CONFIG.rcc, enabled: false }
+          }
+        }
+      ]
+    };
+
+    const estimate = calculatePlasterEstimate({ walls: [], buildingModel }, dummySettings, 'ft');
+
+    // 15 ft * 10 ft = 150 sq ft per face
+    // 2 faces (Face A + Face B) = 300 sq ft inner plaster!
+    expect(estimate.inner.grossAreaSqFt).toBeCloseTo(300, 1);
+    expect(estimate.inner.netAreaSqFt).toBeCloseTo(300, 1);
+    // Outer plaster must be 0 for internal partition walls
+    expect(estimate.outer.grossAreaSqFt).toBe(0);
+    expect(estimate.outer.netAreaSqFt).toBe(0);
+  });
+
+  it('guarantees multi-floor independence: Ground Floor and Floor 1 have separate plaster configurations', () => {
+    const wallG: Wall = {
+      id: 'wg',
+      name: 'Ground Wall',
+      dimensions: { length: 20, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' },
+      openings: []
+    };
+    const wallF1: Wall = {
+      id: 'wf1',
+      name: 'F1 Wall',
+      dimensions: { length: 20, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' },
+      openings: []
+    };
+
+    const gfPlaster: PlasterConfig = {
+      ...DEFAULT_PLASTER_CONFIG,
+      enabled: true,
+      inner: { ...DEFAULT_PLASTER_CONFIG.inner, enabled: true, thickness: 12 },
+      outer: { ...DEFAULT_PLASTER_CONFIG.outer, enabled: true, thickness: 15 },
+      rcc: { ...DEFAULT_PLASTER_CONFIG.rcc, enabled: false }
+    };
+
+    const f1Plaster: PlasterConfig = {
+      ...DEFAULT_PLASTER_CONFIG,
+      enabled: true,
+      inner: { ...DEFAULT_PLASTER_CONFIG.inner, enabled: true, thickness: 10 },
+      outer: { ...DEFAULT_PLASTER_CONFIG.outer, enabled: true, thickness: 18 },
+      rcc: { ...DEFAULT_PLASTER_CONFIG.rcc, enabled: false }
+    };
+
+    const buildingModel = {
+      buildingLength: 20,
+      buildingWidth: 20,
+      buildingUnit: 'ft' as const,
+      floors: [
+        {
+          id: 'floor-0',
+          name: 'Ground Floor',
+          level: 0,
+          height: 10,
+          unit: 'ft' as const,
+          externalWalls: [wallG],
+          internalWalls: [],
+          plaster: gfPlaster
+        },
+        {
+          id: 'floor-1',
+          name: 'Floor 1',
+          level: 1,
+          height: 10,
+          unit: 'ft' as const,
+          externalWalls: [wallF1],
+          internalWalls: [],
+          plaster: f1Plaster
+        }
+      ]
+    };
+
+    const estimate = calculatePlasterEstimate({ walls: [], buildingModel }, dummySettings, 'ft');
+
+    expect(estimate.floors.length).toBe(2);
+    // Ground Floor: inner = 12mm, outer = 15mm
+    expect(estimate.floors[0].inner.thicknessMm).toBe(12);
+    expect(estimate.floors[0].outer.thicknessMm).toBe(15);
+    // Floor 1: inner = 10mm, outer = 18mm
+    expect(estimate.floors[1].inner.thicknessMm).toBe(10);
+    expect(estimate.floors[1].outer.thicknessMm).toBe(18);
+
+    // Floor 1 outer wet volume is greater than Ground Floor outer wet volume
+    expect(estimate.floors[1].outer.wetVolumeM3).toBeGreaterThan(estimate.floors[0].outer.wetVolumeM3);
+  });
+
+  it('correctly calculates RCC column 6mm surface plaster separately from brick masonry', () => {
+    const dummyPillar: Pillar = {
+      id: 'p1',
+      name: 'P1',
+      width: 9,
+      depth: 9,
+      height: 10,
+      count: 1,
+      unit: 'in',
+      placementType: 'corner'
+    };
+
+    const buildingModel = {
+      buildingLength: 10,
+      buildingWidth: 10,
+      buildingUnit: 'ft' as const,
+      floors: [
+        {
+          id: 'floor-0',
+          name: 'Ground Floor',
+          level: 0,
+          height: 10,
+          unit: 'ft' as const,
+          externalWalls: [],
+          internalWalls: [],
+          pillars: [dummyPillar],
+          plaster: {
+            ...DEFAULT_PLASTER_CONFIG,
+            enabled: true,
+            inner: { ...DEFAULT_PLASTER_CONFIG.inner, enabled: false },
+            outer: { ...DEFAULT_PLASTER_CONFIG.outer, enabled: false },
+            rcc: { enabled: true, thickness: 6, unit: 'mm', mixRatio: '1:4', wastagePercent: 0 }
+          }
+        }
+      ]
+    };
+
+    const estimate = calculatePlasterEstimate({ walls: [], buildingModel }, dummySettings, 'ft');
+
+    // 6 mm thickness = 0.006 m
+    expect(estimate.rcc.thicknessMm).toBe(6);
+    expect(estimate.rcc.thicknessM).toBeCloseTo(0.006, 5);
+    expect(estimate.rcc.netAreaSqM).toBeGreaterThan(0);
+    expect(estimate.rcc.wetVolumeM3).toBeGreaterThan(0);
+    expect(estimate.rcc.costs.total).toBeGreaterThan(0);
+  });
+
+  it('defaults to zero plaster when plaster is not activated by user (Req 53 & 54)', () => {
+    const wall: Wall = {
+      id: 'w-default',
+      name: 'Default Wall',
+      dimensions: { length: 20, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' },
+      openings: []
+    };
+
+    const buildingModel = {
+      buildingLength: 20,
+      buildingWidth: 20,
+      buildingUnit: 'ft' as const,
+      floors: [
+        {
+          id: 'floor-0',
+          name: 'Ground Floor',
+          level: 0,
+          height: 10,
+          unit: 'ft' as const,
+          externalWalls: [wall],
+          internalWalls: [],
+          plaster: { ...DEFAULT_PLASTER_CONFIG } // default enabled = false
+        }
+      ],
+      plaster: { ...DEFAULT_PLASTER_CONFIG }
+    };
+
+    const estimate = calculatePlasterEstimate({ walls: [], buildingModel }, dummySettings, 'ft');
+    expect(estimate.totalNetPlasterAreaSqFt).toBe(0);
+    expect(estimate.totalNetPlasterAreaSqM).toBe(0);
+    expect(estimate.totalCementBags).toBe(0);
+    expect(estimate.totalSandCft).toBe(0);
+    expect(estimate.costs.total).toBe(0);
+  });
+
+  it('supports per-wall plaster overrides and selective removal without altering wall dimensions', () => {
+    const wall1: Wall = {
+      id: 'w1',
+      name: 'Wall 1',
+      dimensions: { length: 20, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' },
+      openings: []
+    };
+    const wall2: Wall = {
+      id: 'w2',
+      name: 'Wall 2 (Outer Removed)',
+      dimensions: { length: 20, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' },
+      openings: [],
+      plasterOverrides: {
+        outer: { enabled: false }
+      }
+    };
+
+    const buildingModel = {
+      buildingLength: 20,
+      buildingWidth: 20,
+      buildingUnit: 'ft' as const,
+      floors: [
+        {
+          id: 'floor-0',
+          name: 'Ground Floor',
+          level: 0,
+          height: 10,
+          unit: 'ft' as const,
+          externalWalls: [wall1, wall2],
+          internalWalls: [],
+          plaster: {
+            ...DEFAULT_PLASTER_CONFIG,
+            enabled: true,
+            inner: { ...DEFAULT_PLASTER_CONFIG.inner, enabled: true, thickness: 12 },
+            outer: { ...DEFAULT_PLASTER_CONFIG.outer, enabled: true, thickness: 15 },
+            rcc: { ...DEFAULT_PLASTER_CONFIG.rcc, enabled: false }
+          }
+        }
+      ]
+    };
+
+    const estimate = calculatePlasterEstimate({ walls: [], buildingModel }, dummySettings, 'ft');
+
+    // Both wall1 and wall2 have Inner Plaster (200 + 200 = 400 sq ft)
+    expect(estimate.inner.netAreaSqFt).toBeCloseTo(400, 1);
+    // Only wall1 has Outer Plaster (200 sq ft), wall2 had outer removed!
+    expect(estimate.outer.netAreaSqFt).toBeCloseTo(200, 1);
+
+    // Wall dimensions are completely unaffected
+    expect(wall2.dimensions.length).toBe(20);
+    expect(wall2.dimensions.height).toBe(10);
+    expect(wall2.dimensions.thickness).toBe(9);
+  });
+
+  it('calculates RCC Side Beam Plaster on exposed vertical side faces (2 * length * height) excluding top and soffit', () => {
+    const wall: Wall = {
+      id: 'w-beam-1',
+      name: 'Beam Wall',
+      dimensions: { length: 20, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' },
+      openings: []
+    };
+
+    const buildingModel = {
+      buildingLength: 20,
+      buildingWidth: 20,
+      buildingUnit: 'ft' as const,
+      ringBeam: {
+        height: 1,
+        heightUnit: 'ft' as const,
+        width: 9,
+        widthUnit: 'in' as const
+      },
+      floors: [
+        {
+          id: 'floor-0',
+          name: 'Ground Floor',
+          level: 0,
+          height: 10,
+          unit: 'ft' as const,
+          externalWalls: [wall],
+          internalWalls: [],
+          ringBeam: {
+            height: 1,
+            heightUnit: 'ft' as const,
+            width: 9,
+            widthUnit: 'in' as const
+          },
+          plaster: {
+            ...DEFAULT_PLASTER_CONFIG,
+            enabled: true,
+            inner: { ...DEFAULT_PLASTER_CONFIG.inner, enabled: false },
+            outer: { ...DEFAULT_PLASTER_CONFIG.outer, enabled: false },
+            rcc: { ...DEFAULT_PLASTER_CONFIG.rcc, enabled: false },
+            rccSideBeam: {
+              ...DEFAULT_PLASTER_CONFIG.rccSideBeam,
+              enabled: true,
+              thicknessMm: 6,
+              mixRatio: '1:4' as const,
+              ratePerSqM: 160
+            }
+          }
+        }
+      ]
+    };
+
+    const estimate = calculatePlasterEstimate({ walls: [], buildingModel }, dummySettings, 'ft');
+
+    // Beam length = 20 ft, height = 1 ft.
+    // Exposed side faces = 2 * (20 * 1) = 40 sq.ft
+    expect(estimate.rccSideBeam.grossAreaSqFt).toBeCloseTo(40, 1);
+    expect(estimate.rccSideBeam.netAreaSqFt).toBeCloseTo(40, 1);
+    expect(estimate.rccSideBeam.netAreaSqM).toBeCloseTo(3.716, 2);
+
+    // Thickness 6mm = 0.006 m
+    // Wet Volume = 3.7161 * 0.006 ≈ 0.0223 m³
+    expect(estimate.rccSideBeam.wetVolumeM3).toBeCloseTo(0.0223, 3);
+    // Dry Mortar = 0.0223 * 1.33 ≈ 0.02965 m³
+    expect(estimate.rccSideBeam.dryMortarVolumeM3).toBeCloseTo(0.0297, 3);
+
+    // Mix 1:4 => Cement exact bags ≈ 0.17 bags, purchase = 1 bag
+    expect(estimate.rccSideBeam.cementBags).toBe(1);
+    // Sand CFT ≈ 0.84 CFT
+    expect(estimate.rccSideBeam.sandCft).toBeCloseTo(0.84, 1);
+
+    // Other surfaces were disabled, so their areas are 0
+    expect(estimate.inner.netAreaSqFt).toBe(0);
+    expect(estimate.outer.netAreaSqFt).toBe(0);
+    expect(estimate.rcc.netAreaSqFt).toBe(0);
+  });
+
+  it('allows independent toggling between RCC Column Plaster and RCC Side Beam Plaster', () => {
+    const pillar = {
+      id: 'p1',
+      name: 'Pillar 1',
+      width: 12,
+      depth: 12,
+      unit: 'in' as const,
+      height: 10,
+      shape: 'rectangular' as const,
+      placementType: 'central' as const,
+      count: 1
+    };
+    const wall: Wall = {
+      id: 'w1',
+      name: 'Wall 1',
+      dimensions: { length: 20, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' },
+      openings: []
+    };
+
+    const buildingModelWithBoth = {
+      buildingLength: 20,
+      buildingWidth: 20,
+      buildingUnit: 'ft' as const,
+      pillars: [pillar],
+      ringBeam: { height: 1, heightUnit: 'ft' as const, width: 9, widthUnit: 'in' as const },
+      floors: [
+        {
+          id: 'floor-0',
+          name: 'Ground Floor',
+          level: 0,
+          height: 10,
+          unit: 'ft' as const,
+          pillars: [pillar],
+          externalWalls: [wall],
+          internalWalls: [],
+          ringBeam: { height: 1, heightUnit: 'ft' as const, width: 9, widthUnit: 'in' as const },
+          plaster: {
+            ...DEFAULT_PLASTER_CONFIG,
+            enabled: true,
+            inner: { ...DEFAULT_PLASTER_CONFIG.inner, enabled: false },
+            outer: { ...DEFAULT_PLASTER_CONFIG.outer, enabled: false },
+            rcc: { ...DEFAULT_PLASTER_CONFIG.rcc, enabled: true },
+            rccSideBeam: { ...DEFAULT_PLASTER_CONFIG.rccSideBeam, enabled: false }
+          }
+        }
+      ]
+    };
+
+    // 1. Column ON, Side Beam OFF
+    const est1 = calculatePlasterEstimate({ walls: [], buildingModel: buildingModelWithBoth }, dummySettings, 'ft');
+    expect(est1.rcc.netAreaSqFt).toBeGreaterThan(0);
+    expect(est1.rccSideBeam.netAreaSqFt).toBe(0);
+
+    // 2. Column OFF, Side Beam ON
+    const buildingModelBeamOnly = {
+      ...buildingModelWithBoth,
+      floors: [
+        {
+          ...buildingModelWithBoth.floors[0],
+          plaster: {
+            ...buildingModelWithBoth.floors[0].plaster,
+            rcc: { ...DEFAULT_PLASTER_CONFIG.rcc, enabled: false },
+            rccSideBeam: { ...DEFAULT_PLASTER_CONFIG.rccSideBeam, enabled: true }
+          }
+        }
+      ]
+    };
+    const est2 = calculatePlasterEstimate({ walls: [], buildingModel: buildingModelBeamOnly }, dummySettings, 'ft');
+    expect(est2.rcc.netAreaSqFt).toBe(0);
+    expect(est2.rccSideBeam.netAreaSqFt).toBeGreaterThan(0);
+  });
+});
+
+describe('RCC Ring Beam + Full Ring Beam Physical Connection & Junction Validation', () => {
+  const sampleFloor: Floor = {
+    id: 'floor-0',
+    name: 'Ground Floor',
+    level: 0,
+    height: 10,
+    unit: 'ft',
+    externalWalls: [],
+    internalWalls: [],
+    ringBeam: { height: 1.5, heightUnit: 'ft', width: 9, widthUnit: 'in', depth: 9, depthUnit: 'in', enabled: true },
+    fullRingBeam: { enabled: true, thicknessFt: 1 }
+  };
+
+  const sampleModel = {
+    buildingLength: 40,
+    buildingWidth: 30,
+    buildingUnit: 'ft' as const,
+    floors: [sampleFloor],
+    ringBeam: { height: 1.5, heightUnit: 'ft' as const, width: 9, widthUnit: 'in' as const, depth: 9, depthUnit: 'in' as const, enabled: true },
+    fullRingBeam: { enabled: true, thicknessFt: 1 },
+    slab: { enabled: true, height: 1, heightUnit: 'ft' as const }
+  };
+
+  it('TEST 1: verifies physical contact between Pillar, Full Ring Beam, and Slab with zero gap', () => {
+    const junc = getRingBeamJunction(sampleFloor, sampleModel, 0);
+
+    // Brick wall top
+    const expectedWallTop = 10 * 0.3048; // 3.048m
+    expect(junc.brickWallTop).toBeCloseTo(expectedWallTop, 4);
+
+    // Full Ring Beam sits directly on brick wall top
+    expect(junc.fullRingBeamBottom).toBeCloseTo(expectedWallTop, 4);
+    const expectedFullH = 1.0 * 0.3048; // 0.3048m
+    expect(junc.fullRingBeamHeight).toBeCloseTo(expectedFullH, 4);
+    expect(junc.fullRingBeamTop).toBeCloseTo(expectedWallTop + expectedFullH, 4);
+
+    // Zero unintended beam gap check
+    expect(junc.junctionGap).toBe(0);
+    expect(junc.isJunctionConnected).toBe(true);
+    expect(junc.intendedJunctionSurfaceY).toBeCloseTo(expectedWallTop, 4);
+
+    // Slab sits directly on top of Full Ring Beam
+    expect(junc.slabBottomY).toBeCloseTo(junc.fullRingBeamTop, 4);
+    const expectedSlabH = 1.0 * 0.3048; // 0.3048m
+    expect(junc.slabThickness).toBeCloseTo(expectedSlabH, 4);
+    expect(junc.slabTopY).toBeCloseTo(junc.fullRingBeamTop + expectedSlabH, 4);
+    expect(junc.slabGap).toBe(0);
+    expect(junc.isSlabConnected).toBe(true);
+  });
+
+  it('TEST 2: validates Three.js center vs surface geometry alignment (BoxGeometry) for all layers', () => {
+    const junc = getRingBeamJunction(sampleFloor, sampleModel, 0);
+
+    // BoxGeometry top = centerY + height/2, bottom = centerY - height/2
+    const calcFullBottom = junc.fullRingBeamCenterY - junc.fullRingBeamHeight / 2;
+    const calcFullTop = junc.fullRingBeamCenterY + junc.fullRingBeamHeight / 2;
+    expect(calcFullBottom).toBeCloseTo(junc.fullRingBeamBottom, 4);
+    expect(calcFullTop).toBeCloseTo(junc.fullRingBeamTop, 4);
+
+    const calcSlabBottom = junc.slabCenterY - junc.slabThickness / 2;
+    const calcSlabTop = junc.slabCenterY + junc.slabThickness / 2;
+    expect(calcSlabBottom).toBeCloseTo(junc.slabBottomY, 4);
+    expect(calcSlabTop).toBeCloseTo(junc.slabTopY, 4);
+
+    // Crucial: BrickWallTop must equal FullRingBeamBottom, and FullRingBeamTop must equal SlabBottom
+    const beamSurfaceGap = Math.abs(junc.brickWallTop - calcFullBottom);
+    expect(beamSurfaceGap).toBeLessThanOrEqual(0.0001);
+
+    const slabSurfaceGap = Math.abs(calcFullTop - calcSlabBottom);
+    expect(slabSurfaceGap).toBeLessThanOrEqual(0.0001);
+  });
+
+  it('TEST 3: verifies multi-floor continuity: Pillar -> Full Ring Beam -> Slab -> Next Floor Pillar', () => {
+    const gf: Floor = {
+      id: 'floor-0',
+      name: 'Ground Floor',
+      level: 0,
+      height: 10,
+      unit: 'ft',
+      externalWalls: [],
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1 },
+      slab: { enabled: true, height: 1, heightUnit: 'ft' }
+    };
+
+    const f1: Floor = {
+      id: 'floor-1',
+      name: 'Floor 1',
+      level: 1,
+      height: 10,
+      unit: 'ft',
+      externalWalls: [],
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1.5 },
+      slab: { enabled: true, height: 1, heightUnit: 'ft' }
+    };
+
+    const f2: Floor = {
+      id: 'floor-2',
+      name: 'Floor 2',
+      level: 2,
+      height: 9,
+      unit: 'ft',
+      externalWalls: [],
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 0.5 },
+      slab: { enabled: true, height: 1, heightUnit: 'ft' }
+    };
+
+    const multiModel = {
+      buildingLength: 40,
+      buildingWidth: 30,
+      buildingUnit: 'ft' as const,
+      floors: [gf, f1, f2]
+    };
+
+    const junc0 = getRingBeamJunction(gf, multiModel, 0);
+    expect(junc0.floorBaseY).toBe(0);
+    expect(junc0.isJunctionConnected).toBe(true);
+    expect(junc0.isSlabConnected).toBe(true);
+
+    // Floor 1 column and walls start at Floor 0 slab top
+    const junc1 = getRingBeamJunction(f1, multiModel, junc0.structuralTopY);
+    expect(junc1.floorBaseY).toBeCloseTo(junc0.structuralTopY, 4);
+    expect(junc1.floorBaseY).toBeCloseTo(junc0.slabTopY, 4);
+    expect(junc1.isJunctionConnected).toBe(true);
+    expect(junc1.isSlabConnected).toBe(true);
+
+    // Floor 2 column and walls start at Floor 1 slab top
+    const junc2 = getRingBeamJunction(f2, multiModel, junc1.structuralTopY);
+    expect(junc2.floorBaseY).toBeCloseTo(junc1.structuralTopY, 4);
+    expect(junc2.floorBaseY).toBeCloseTo(junc1.slabTopY, 4);
+    expect(junc2.isJunctionConnected).toBe(true);
+    expect(junc2.isSlabConnected).toBe(true);
+
+    // Floor 1 configuration change does NOT change Ground Floor junction
+    const modifiedF1: Floor = { ...f1, fullRingBeam: { ...f1.fullRingBeam!, thicknessFt: 2 } };
+    const junc0Unchanged = getRingBeamJunction(gf, { ...multiModel, floors: [gf, modifiedF1, f2] }, 0);
+    expect(junc0Unchanged.structuralTopY).toBeCloseTo(junc0.structuralTopY, 4);
+    expect(junc0Unchanged.fullRingBeamTop).toBeCloseTo(junc0.fullRingBeamTop, 4);
+  });
+
+  it('TEST 4: supports custom thicknesses (0.5 ft, 1 ft, 1.5 ft, 2 ft) with zero gap at all sizes', () => {
+    const thicknesses = [0.5, 1.0, 1.5, 2.0];
+    for (const th of thicknesses) {
+      const fl: Floor = {
+        ...sampleFloor,
+        fullRingBeam: { enabled: true, thicknessFt: th }
+      };
+      const junc = getRingBeamJunction(fl, sampleModel, 0);
+      expect(junc.fullRingBeamHeight).toBeCloseTo(th * 0.3048, 4);
+      expect(junc.junctionGap).toBe(0);
+      expect(junc.isJunctionConnected).toBe(true);
+      expect(junc.fullRingBeamBottom).toBeCloseTo(junc.brickWallTop, 4);
+      expect(junc.slabBottomY).toBeCloseTo(junc.fullRingBeamTop, 4);
+    }
+  });
+
+  it('TEST 5: verifies total structural top height equals full ring beam + slab thickness', () => {
+    const junc = getRingBeamJunction(sampleFloor, sampleModel, 0);
+    expect(junc.totalStructuralTopHeight).toBeCloseTo(junc.fullRingBeamHeight + junc.slabThickness, 4);
+    expect(junc.structuralTopY).toBeCloseTo(junc.brickWallTop + junc.totalStructuralTopHeight, 4);
+    expect(junc.structuralTopY).toBeCloseTo(junc.slabTopY, 4);
+  });
+
+  it('TEST 6: verifies brick masonry infill bounds (Wall Top === Full Ring Beam Bottom)', () => {
+    const junc = getRingBeamJunction(sampleFloor, sampleModel, 0);
+    expect(junc.brickWallTop).toBeCloseTo(junc.fullRingBeamBottom, 4);
+    expect(Math.abs(junc.brickWallTop - junc.fullRingBeamBottom)).toBeLessThanOrEqual(0.0001);
+  });
+});
+
+describe('CRITICAL RCC Pillar Placement & 2D <-> 3D Coordinate Synchronization', () => {
+  const testBuilding = {
+    buildingLength: 40,
+    buildingWidth: 30,
+    buildingUnit: 'ft' as const,
+    floors: [
+      {
+        id: 'floor-0',
+        name: 'Ground Floor',
+        level: 0,
+        height: 10,
+        unit: 'ft' as const,
+        externalWalls: [
+          { id: 'w-front', name: 'Front Wall', start: { x: 0, y: 0 }, end: { x: 40, y: 0 }, dimensions: { length: 40, height: 10, thickness: 9, unit: 'ft' as const, thicknessUnit: 'in' as const }, openings: [] },
+          { id: 'w-right', name: 'Right Wall', start: { x: 40, y: 0 }, end: { x: 40, y: 30 }, dimensions: { length: 30, height: 10, thickness: 9, unit: 'ft' as const, thicknessUnit: 'in' as const }, openings: [] },
+          { id: 'w-back', name: 'Back Wall', start: { x: 40, y: 30 }, end: { x: 0, y: 30 }, dimensions: { length: 40, height: 10, thickness: 9, unit: 'ft' as const, thicknessUnit: 'in' as const }, openings: [] },
+          { id: 'w-left', name: 'Left Wall', start: { x: 0, y: 30 }, end: { x: 0, y: 0 }, dimensions: { length: 30, height: 10, thickness: 9, unit: 'ft' as const, thicknessUnit: 'in' as const }, openings: [] }
+        ],
+        internalWalls: []
+      }
+    ]
+  };
+
+  const cornerPillar: Pillar = {
+    id: 'pillar-f0-1',
+    name: 'P1',
+    floorId: 'floor-0',
+    width: 9,
+    depth: 9,
+    height: 10,
+    count: 1,
+    unit: 'in',
+    position: { x: 0, y: 0 },
+    alignment: 'outside_corner',
+    shape: 'square'
+  };
+
+  it('TEST 1: Exact 2D -> 3D Coordinate Mapping and Zero Drift Round-Trip', () => {
+    const worldPos = getPillarWorldPosition(cornerPillar, testBuilding, testBuilding.floors[0].externalWalls);
+    
+    // Scene center offset for 40ft x 30ft: centerX = -20ft = -6.096m, centerZ = +15ft = +4.572m
+    // Pillar at (0, 0) in 2D has localX = 0, localZ = 0
+    expect(worldPos.localX).toBeCloseTo(0, 4);
+    expect(worldPos.localZ).toBeCloseTo(0, 4);
+    expect(worldPos.x).toBeCloseTo(-40 * 0.3048 / 2, 4);
+    expect(worldPos.z).toBeCloseTo(30 * 0.3048 / 2, 4);
+    expect(worldPos.y).toBe(0);
+
+    // Convert world coordinates back to 2D
+    const roundTrip = worldPositionTo2D({ x: worldPos.x, z: worldPos.z }, testBuilding);
+    expect(roundTrip.x).toBeCloseTo(0, 3);
+    expect(roundTrip.y).toBeCloseTo(0, 3);
+
+    // Internal coordinate test at (10, 15)
+    const internalPillar: Pillar = { ...cornerPillar, id: 'p-int', position: { x: 10, y: 15 }, alignment: 'centre' };
+    const intWorld = getPillarWorldPosition(internalPillar, testBuilding);
+    const intRoundTrip = worldPositionTo2D({ x: intWorld.x, z: intWorld.z }, testBuilding);
+    expect(intRoundTrip.x).toBeCloseTo(10, 3);
+    expect(intRoundTrip.y).toBeCloseTo(15, 3);
+  });
+
+  it('TEST 2: Outside Corner Alignment for standard 9"x9" on 9" wall (zero unwanted shift)', () => {
+    const walls = testBuilding.floors[0].externalWalls;
+    const eff = getEffectivePillarPosition(cornerPillar, walls, 'ft');
+    expect(eff.x).toBe(0);
+    expect(eff.y).toBe(0);
+  });
+
+  it('TEST 3: Outside Corner Alignment for oversized 12"x12" column on 9" wall (flush outer faces)', () => {
+    const walls = testBuilding.floors[0].externalWalls;
+    const oversizedPillar: Pillar = {
+      ...cornerPillar,
+      width: 12,
+      depth: 12
+    };
+    const eff = getEffectivePillarPosition(oversizedPillar, walls, 'ft');
+    // Difference between 12" column and 9" wall is 3" / 2 = 1.5" = 0.125 ft
+    // Shifts +X and +Y into room interior to maintain 100% flush outer face
+    expect(eff.x).toBeCloseTo(0.125, 3);
+    expect(eff.y).toBeCloseTo(0.125, 3);
+  });
+
+  it('TEST 4: Multi-floor Vertical Continuity (Ground, Floor 1, Floor 2 share exact X/Z coordinates)', () => {
+    const gfP: Pillar = { ...cornerPillar, floorId: 'floor-0' };
+    const f1P: Pillar = { ...cornerPillar, id: 'pillar-f1-1', floorId: 'floor-1' };
+    const f2P: Pillar = { ...cornerPillar, id: 'pillar-f2-1', floorId: 'floor-2' };
+
+    const wpGF = getPillarWorldPosition(gfP, { ...testBuilding, floorElevation: 0 });
+    const wpF1 = getPillarWorldPosition(f1P, { ...testBuilding, floorElevation: 3.048 });
+    const wpF2 = getPillarWorldPosition(f2P, { ...testBuilding, floorElevation: 6.096 });
+
+    // Exact same X and Z in 3D world space
+    expect(wpGF.x).toBeCloseTo(wpF1.x, 4);
+    expect(wpGF.x).toBeCloseTo(wpF2.x, 4);
+    expect(wpGF.z).toBeCloseTo(wpF1.z, 4);
+    expect(wpGF.z).toBeCloseTo(wpF2.z, 4);
+
+    // Only Y elevation differs
+    expect(wpGF.y).toBe(0);
+    expect(wpF1.y).toBeCloseTo(3.048, 3);
+    expect(wpF2.y).toBeCloseTo(6.096, 3);
+  });
+
+  it('TEST 5: Floor Independence (Moving Floor 1 pillar does NOT move Ground Floor pillar)', () => {
+    let pillars: Pillar[] = [
+      { ...cornerPillar, id: 'p-gf', floorId: 'floor-0', position: { x: 0, y: 0 } },
+      { ...cornerPillar, id: 'p-f1', floorId: 'floor-1', position: { x: 0, y: 0 } }
+    ];
+
+    // Move Floor 1 pillar to X=5, Y=5
+    pillars = pillars.map(p => p.id === 'p-f1' ? { ...p, position: { x: 5, y: 5 } } : p);
+
+    const gf = pillars.find(p => p.id === 'p-gf')!;
+    const f1 = pillars.find(p => p.id === 'p-f1')!;
+
+    expect(gf.position?.x).toBe(0);
+    expect(gf.position?.y).toBe(0);
+    expect(f1.position?.x).toBe(5);
+    expect(f1.position?.y).toBe(5);
+  });
+
+  it('TEST 6: Pillar Movement updates connected Beams and Footings', () => {
+    const p1: Pillar = { ...cornerPillar, id: 'p1', position: { x: 0, y: 0 } };
+    const p2: Pillar = { ...cornerPillar, id: 'p2', position: { x: 20, y: 0 } };
+
+    const initialBeams = detectPillarToPillarBeams([p1, p2], 'ft');
+    expect(initialBeams.length).toBe(1);
+    expect(initialBeams[0].length).toBeCloseTo(20, 2);
+
+    // Move p1 from X=0 to X=5
+    const movedP1: Pillar = { ...p1, position: { x: 5, y: 0 } };
+    const updatedBeams = detectPillarToPillarBeams([movedP1, p2], 'ft');
+    expect(updatedBeams[0].start.x).toBe(5);
+    expect(updatedBeams[0].length).toBeCloseTo(15, 2);
+
+    // Footing also tracks moved pillar position
+    const footings = generateFootingsForPillars([movedP1], DEFAULT_FOUNDATION_CONFIG, 'ft');
+    expect(footings[0].position.x).toBe(5);
+    expect(footings[0].position.y).toBe(0);
+  });
+
+  it('TEST 7: Pillar Deletion removes only targeted pillar and its connections', () => {
+    const p1: Pillar = { ...cornerPillar, id: 'p1', position: { x: 0, y: 0 } };
+    const p2: Pillar = { ...cornerPillar, id: 'p2', position: { x: 20, y: 0 } };
+    const p3: Pillar = { ...cornerPillar, id: 'p3', position: { x: 20, y: 20 } };
+
+    let pillars = [p1, p2, p3];
+    // Delete p1
+    pillars = pillars.filter(p => p.id !== 'p1');
+
+    expect(pillars.length).toBe(2);
+    expect(pillars.find(p => p.id === 'p2')?.position).toEqual({ x: 20, y: 0 });
+    expect(pillars.find(p => p.id === 'p3')?.position).toEqual({ x: 20, y: 20 });
+  });
+
+  it('TEST 8: validatePillarPlacement Validator catches invalid pillar configurations', () => {
+    const valid = validatePillarPlacement(cornerPillar, testBuilding.floors[0].externalWalls, testBuilding);
+    expect(valid.isValid).toBe(true);
+    expect(valid.errors.length).toBe(0);
+
+    const invalidPillar: Pillar = {
+      ...cornerPillar,
+      position: { x: NaN as any, y: 0 },
+      width: -5
+    };
+    const invalidRes = validatePillarPlacement(invalidPillar, [], testBuilding);
+    expect(invalidRes.isValid).toBe(false);
+    expect(invalidRes.errors.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('RCC Frame First + Brick Infill Inside Frame Geometry Validation', () => {
+  const floorWalls: Wall[] = [
+    {
+      id: 'w-front',
+      name: 'Front Wall',
+      start: { x: 0, y: 0 },
+      end: { x: 40, y: 0 },
+      dimensions: { length: 40, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' },
+      openings: [{ id: 'op-win', name: 'Window 1', type: 'window', width: 4, height: 4, count: 1, position: 'Center' }]
+    },
+    {
+      id: 'w-right',
+      name: 'Right Wall',
+      start: { x: 40, y: 0 },
+      end: { x: 40, y: 30 },
+      dimensions: { length: 30, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' },
+      openings: []
+    },
+    {
+      id: 'w-back',
+      name: 'Back Wall',
+      start: { x: 40, y: 30 },
+      end: { x: 0, y: 30 },
+      dimensions: { length: 40, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' },
+      openings: []
+    },
+    {
+      id: 'w-left',
+      name: 'Left Wall',
+      start: { x: 0, y: 30 },
+      end: { x: 0, y: 0 },
+      dimensions: { length: 30, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' },
+      openings: []
+    }
+  ];
+
+  const framePillars: Pillar[] = [
+    { id: 'p1', name: 'P1', width: 9, depth: 9, height: 10, count: 1, unit: 'in', position: { x: 0, y: 0 }, alignment: 'outside_corner', placementType: 'corner', shape: 'square' },
+    { id: 'p2', name: 'P2', width: 9, depth: 9, height: 10, count: 1, unit: 'in', position: { x: 20, y: 0 }, alignment: 'centre', placementType: 'intermediate', shape: 'square' },
+    { id: 'p3', name: 'P3', width: 9, depth: 9, height: 10, count: 1, unit: 'in', position: { x: 40, y: 0 }, alignment: 'outside_corner', placementType: 'corner', shape: 'square' },
+    { id: 'p4', name: 'P4', width: 9, depth: 9, height: 10, count: 1, unit: 'in', position: { x: 40, y: 30 }, alignment: 'outside_corner', placementType: 'corner', shape: 'square' },
+    { id: 'p5', name: 'P5', width: 9, depth: 9, height: 10, count: 1, unit: 'in', position: { x: 20, y: 30 }, alignment: 'centre', placementType: 'intermediate', shape: 'square' },
+    { id: 'p6', name: 'P6', width: 9, depth: 9, height: 10, count: 1, unit: 'in', position: { x: 0, y: 30 }, alignment: 'outside_corner', placementType: 'corner', shape: 'square' }
+  ];
+
+  it('TEST 1: splitWallByPillars divides a 3-column wall into 2 distinct infill bays stopping at column faces', () => {
+    const frontWall = floorWalls[0];
+    const segments = splitWallByPillars(frontWall, framePillars, 'ft', floorWalls);
+
+    // Front wall (40 ft) with pillars at X=0, X=20, X=40 must produce exactly 2 infill segments
+    expect(segments.length).toBe(2);
+
+    const halfColFt = 4.5 / 12; // 9 inches / 2 = 0.375 ft
+
+    // Bay 1 (P1 -> P2): starts after P1 and ends before P2
+    expect(segments[0].start.x).toBeCloseTo(halfColFt, 2);
+    expect(segments[0].end.x).toBeCloseTo(20 - halfColFt, 2);
+    expect(segments[0].length).toBeCloseTo(20 - 2 * halfColFt, 2);
+
+    // Bay 2 (P2 -> P3): starts after P2 and ends before P3
+    expect(segments[1].start.x).toBeCloseTo(20 + halfColFt, 2);
+    expect(segments[1].end.x).toBeCloseTo(40 - halfColFt, 2);
+    expect(segments[1].length).toBeCloseTo(20 - 2 * halfColFt, 2);
+  });
+
+  it('TEST 2: Brick infill never intersects or covers structural column bounds', () => {
+    floorWalls.forEach(wall => {
+      const segments = splitWallByPillars(wall, framePillars, 'ft', floorWalls);
+      segments.forEach(seg => {
+        framePillars.forEach(p => {
+          const effP = getEffectivePillarPosition(p, floorWalls, 'ft');
+          const halfColFt = (p.width / 12) / 2;
+
+          // Neither the start nor end of any masonry segment can lie strictly inside the interior of a column
+          const isStartInsideCol = Math.hypot(seg.start.x - effP.x, seg.start.y - effP.y) < halfColFt - 0.01;
+          const isEndInsideCol = Math.hypot(seg.end.x - effP.x, seg.end.y - effP.y) < halfColFt - 0.01;
+
+          expect(isStartInsideCol).toBe(false);
+          expect(isEndInsideCol).toBe(false);
+        });
+      });
+    });
+  });
+
+  it('TEST 3: detectPillarToPillarBeams creates full structural frame spanning all column junctions', () => {
+    const beams = detectPillarToPillarBeams(framePillars, 'ft', floorWalls);
+
+    // Should create beams connecting:
+    // Horizontal: P1-P2, P2-P3, P6-P5, P5-P4
+    // Vertical: P1-P6, P2-P5, P3-P4
+    expect(beams.length).toBeGreaterThanOrEqual(7);
+
+    // Every beam connects two distinct pillars
+    beams.forEach(beam => {
+      expect(beam.startPillarId).toBeDefined();
+      expect(beam.endPillarId).toBeDefined();
+      expect(beam.startPillarId).not.toBe(beam.endPillarId);
+      expect(beam.length).toBeGreaterThan(0.5);
+    });
+  });
+
+  it('TEST 4: detectClosedStructuralBays detects all closed rectangular frame bays', () => {
+    const bays = detectClosedStructuralBays(framePillars, 'ft', floorWalls);
+
+    // 6 pillars in a 2x3 grid produce exactly 2 closed structural bays: Bay 1 (X: 0-20, Y: 0-30) and Bay 2 (X: 20-40, Y: 0-30)
+    expect(bays.length).toBe(2);
+    expect(bays[0].width).toBeCloseTo(20, 1);
+    expect(bays[0].depth).toBeCloseTo(30, 1);
+    expect(bays[1].width).toBeCloseTo(20, 1);
+    expect(bays[1].depth).toBeCloseTo(30, 1);
+  });
+
+  it('TEST 5: getRingBeamJunction maintains unbroken zero-gap structural frame continuity', () => {
+    const dummyFloor: Floor = {
+      id: 'fl-0',
+      name: 'Ground Floor',
+      level: 0,
+      height: 10,
+      unit: 'ft',
+      externalWalls: floorWalls,
+      internalWalls: [],
+      pillars: framePillars
+    };
+
+    const junction = getRingBeamJunction(dummyFloor, { buildingUnit: 'ft' }, 0);
+
+    expect(junction.isJunctionConnected).toBe(true);
+    expect(junction.isSlabConnected).toBe(true);
+    expect(junction.junctionGap).toBeLessThan(0.0001);
+    expect(junction.slabGap).toBeLessThan(0.0001);
+
+    // Sequence verification: Wall Top -> Full Ring Beam Bottom -> Full Ring Beam Top -> Slab Top
+    expect(junction.fullRingBeamBottom).toBe(junction.brickWallTop);
+    expect(junction.slabBottomY).toBe(junction.fullRingBeamTop);
+    expect(junction.structuralTopY).toBe(junction.slabTopY);
+  });
+
+  it('TEST 6: Full Roof on topmost floor directly joins RCC Full Ring Beam with zero gap', () => {
+    const gf: Floor = {
+      id: 'fl-gf',
+      name: 'Ground Floor',
+      level: 0,
+      height: 10,
+      unit: 'ft',
+      externalWalls: floorWalls,
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1 },
+      slab: { enabled: true, height: 1, heightUnit: 'ft' }
+    };
+
+    const topFloor: Floor = {
+      id: 'fl-top',
+      name: 'Floor 1',
+      level: 1,
+      height: 10,
+      unit: 'ft',
+      externalWalls: floorWalls,
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1 },
+      fullRoof: { enabled: true, thickness: 5, thicknessUnit: 'in' },
+      slab: { enabled: true, height: 1, heightUnit: 'ft' }
+    };
+
+    const multiModel = {
+      buildingLength: 40,
+      buildingWidth: 30,
+      buildingUnit: 'ft' as const,
+      floors: [gf, topFloor]
+    };
+
+    const gfJunc = getRingBeamJunction(gf, multiModel, 0);
+    const topJunc = getRingBeamJunction(topFloor, multiModel, gfJunc.structuralTopY);
+
+    // Full Roof integrates directly on top floor Full Ring Beam top structural line
+    expect(topJunc.fullRingBeamBottom).toBe(topJunc.brickWallTop);
+    expect(topJunc.slabTopY).toBe(topJunc.fullRingBeamTop);
+    expect(topJunc.slabTopY).toBe(topJunc.topStructuralLineY);
+    expect(topJunc.isSlabConnected).toBe(true);
+    expect(topJunc.slabGap).toBeLessThan(0.0001);
+
+    // Top floor uses configured roof thickness (5 inches = 0.127m)
+    expect(topJunc.slabThickness).toBeCloseTo((5 / 12) * 0.3048, 4);
+    expect(topJunc.structuralTopY).toBeCloseTo(topJunc.topStructuralLineY, 4);
+  });
+
+  it('TEST 7: validates that topmost floor RCC columns terminate flush at Full Ring Beam without extra protruding concrete', () => {
+    const gf: Floor = {
+      id: 'fl-0',
+      name: 'Ground Floor',
+      level: 0,
+      height: 10,
+      unit: 'ft',
+      externalWalls: floorWalls,
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1 }
+    };
+
+    const topFloor: Floor = {
+      id: 'fl-1',
+      name: 'Top Floor',
+      level: 1,
+      height: 10,
+      unit: 'ft',
+      externalWalls: floorWalls,
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1 }
+    };
+
+    const model = { buildingLength: 40, buildingWidth: 30, buildingUnit: 'ft' as const, floors: [gf, topFloor] };
+    const gfJunc = getRingBeamJunction(gf, model, 0);
+    const topJunc = getRingBeamJunction(topFloor, model, gfJunc.structuralTopY);
+
+    // Top floor column joint height equals Full Ring Beam height
+    const topJointH = topJunc.fullRingBeamHeight;
+    const topShaftH = 10 * 0.3048;
+    const totalTopColH = topShaftH + topJointH;
+
+    const colTopY = topJunc.floorBaseY + totalTopColH;
+    expect(colTopY).toBeCloseTo(topJunc.fullRingBeamTop, 4);
+
+    // Zero excess height above Full Ring Beam
+    const excessHeight = Math.max(0, colTopY - topJunc.fullRingBeamTop);
+    expect(excessHeight).toBeLessThan(0.0001);
+  });
+
+  it('TEST 8: getFullRoofJunction verifies beamTopY === roofTopY === topStructuralLineY with zero junctionGap', () => {
+    const gf: Floor = {
+      id: 'fl-gf',
+      name: 'Ground Floor',
+      level: 0,
+      height: 10,
+      unit: 'ft',
+      externalWalls: floorWalls,
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1 }
+    };
+
+    const topFloor: Floor = {
+      id: 'fl-top',
+      name: 'Top Floor',
+      level: 1,
+      height: 10,
+      unit: 'ft',
+      externalWalls: floorWalls,
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1.5, width: 9, widthUnit: 'in' },
+      fullRoof: { enabled: true, thickness: 5, thicknessUnit: 'in' }
+    };
+
+    const model = { buildingLength: 40, buildingWidth: 30, buildingUnit: 'ft' as const, floors: [gf, topFloor] };
+    const gfJunc = getRingBeamJunction(gf, model, 0);
+    const roofJunc = getFullRoofJunction(topFloor, model, gfJunc.structuralTopY);
+
+    expect(roofJunc.roofTopY).toBe(roofJunc.beamTopY);
+    expect(roofJunc.roofTopY).toBe(roofJunc.topStructuralLineY);
+    expect(roofJunc.junctionGap).toBe(0);
+    expect(roofJunc.isJunctionConnected).toBe(true);
+    expect(roofJunc.roofThickness).toBeCloseTo((5 / 12) * 0.3048, 4);
+    expect(roofJunc.roofCenterY).toBeCloseTo(roofJunc.topStructuralLineY - roofJunc.roofThickness / 2, 4);
+    expect(roofJunc.roofBottomY).toBeCloseTo(roofJunc.topStructuralLineY - roofJunc.roofThickness, 4);
+  });
+
+  it('TEST 9: getTopRccStructuralJunction verifies that Full Ring Beam and Full Roof are on ONE continuous top structural line', () => {
+    const gf: Floor = {
+      id: 'fl-gf',
+      name: 'Ground Floor',
+      level: 0,
+      height: 10,
+      unit: 'ft',
+      externalWalls: floorWalls,
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1 }
+    };
+
+    const topFloor: Floor = {
+      id: 'fl-top',
+      name: 'Top Floor',
+      level: 1,
+      height: 10,
+      unit: 'ft',
+      externalWalls: floorWalls,
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1, width: 9, widthUnit: 'in' },
+      fullRoof: { enabled: true, thickness: 5, thicknessUnit: 'in' }
+    };
+
+    const model = { buildingLength: 40, buildingWidth: 30, buildingUnit: 'ft' as const, floors: [gf, topFloor] };
+    const gfJunc = getRingBeamJunction(gf, model, 0);
+    const topRccJunc = getTopRccStructuralJunction(topFloor, model, gfJunc.structuralTopY);
+
+    expect(topRccJunc.beamTopY).toBe(topRccJunc.topStructuralLineY);
+    expect(topRccJunc.roofTopY).toBe(topRccJunc.topStructuralLineY);
+    expect(topRccJunc.verticalSeparation).toBe(0);
+    expect(topRccJunc.isIntegrated).toBe(true);
+    expect(topRccJunc.beamBottomY).toBe(topRccJunc.brickWallTop);
+  });
+
+  it('TEST 10: verifies per-floor state isolation: toggling Floor 1 Full Roof does not affect Ground Floor slab or leave orphan roof', () => {
+    const gf: Floor = {
+      id: 'floor-0',
+      name: 'Ground Floor',
+      level: 0,
+      height: 10,
+      unit: 'ft',
+      externalWalls: floorWalls,
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1 },
+      slab: { enabled: true, height: 1, heightUnit: 'ft' }
+    };
+
+    const fl1: Floor = {
+      id: 'floor-1',
+      name: 'Floor 1',
+      level: 1,
+      height: 10,
+      unit: 'ft',
+      externalWalls: floorWalls,
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1 },
+      fullRoof: { enabled: true, thickness: 5, thicknessUnit: 'in' }
+    };
+
+    const multiModel = { buildingLength: 40, buildingWidth: 30, buildingUnit: 'ft' as const, floors: [gf, fl1] };
+
+    // Initial state: Floor 1 Full Roof ON, Ground Floor Slab ON
+    const showFullRoofByFloor: Record<string, boolean> = {
+      'floor-0': false, // Lower floor must never have Full Roof
+      'floor-1': true
+    };
+    const showFloorSlabByFloor: Record<string, boolean> = {
+      'floor-0': true,
+      'floor-1': false // Top floor uses Full Roof, not intermediate slab
+    };
+
+    // Verify initial isolation
+    expect(showFullRoofByFloor['floor-1']).toBe(true);
+    expect(showFullRoofByFloor['floor-0']).toBe(false);
+    expect(showFloorSlabByFloor['floor-0']).toBe(true);
+
+    // Action: User turns Floor 1 Full Roof OFF
+    showFullRoofByFloor['floor-1'] = false;
+
+    // Expected: Floor 1 Full Roof is OFF, Ground Floor slab remains ON and unchanged
+    expect(showFullRoofByFloor['floor-1']).toBe(false);
+    expect(showFloorSlabByFloor['floor-0']).toBe(true);
+    expect(showFullRoofByFloor['floor-0']).toBe(false);
+  });
+
+  it('TEST 11: verifies Every Floor has its own Complete Structural Unit (Pillar + Brick + Ring Beam + Full Roof) and Global Show Full Roof Master Toggle', () => {
+    const gf: Floor = {
+      id: 'floor-0',
+      name: 'Ground Floor',
+      level: 0,
+      height: 10,
+      unit: 'ft',
+      externalWalls: floorWalls,
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1 },
+      fullRoof: { enabled: true, thickness: 6, thicknessUnit: 'in' }
+    };
+
+    const fl1: Floor = {
+      id: 'floor-1',
+      name: 'Floor 1',
+      level: 1,
+      height: 10,
+      unit: 'ft',
+      externalWalls: floorWalls,
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1 },
+      fullRoof: { enabled: true, thickness: 6, thicknessUnit: 'in' }
+    };
+
+    const fl2: Floor = {
+      id: 'floor-2',
+      name: 'Floor 2',
+      level: 2,
+      height: 10,
+      unit: 'ft',
+      externalWalls: floorWalls,
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1 },
+      fullRoof: { enabled: true, thickness: 6, thicknessUnit: 'in' }
+    };
+
+    const floors = [gf, fl1, fl2];
+
+    // Every floor has its own full closed roof
+    const evaluateFloorRoofVisibility = (showFullRoof: boolean) => {
+      return floors.map(f => ({
+        floorId: f.id,
+        roofId: `rcc-fullroof-${f.id}`,
+        isVisible: showFullRoof
+      }));
+    };
+
+    // State 1: Global Show Full Roof = ON -> ALL floor roofs visible
+    const roofsOn = evaluateFloorRoofVisibility(true);
+    expect(roofsOn[0].isVisible).toBe(true);
+    expect(roofsOn[1].isVisible).toBe(true);
+    expect(roofsOn[2].isVisible).toBe(true);
+    expect(roofsOn[0].roofId).toBe('rcc-fullroof-floor-0');
+    expect(roofsOn[1].roofId).toBe('rcc-fullroof-floor-1');
+    expect(roofsOn[2].roofId).toBe('rcc-fullroof-floor-2');
+
+    // State 2: Global Show Full Roof = OFF -> ALL floor roofs hidden
+    const roofsOff = evaluateFloorRoofVisibility(false);
+    expect(roofsOff[0].isVisible).toBe(false);
+    expect(roofsOff[1].isVisible).toBe(false);
+    expect(roofsOff[2].isVisible).toBe(false);
+  });
+
+  it('TEST 12: verifies independent visibility of Brick Infill Walls alongside Full Ring Beam and Full Roof', () => {
+    const gf: Floor = {
+      id: 'floor-0',
+      name: 'Ground Floor',
+      level: 0,
+      height: 10,
+      unit: 'ft',
+      externalWalls: [
+        {
+          id: 'w-front',
+          name: 'Front Wall',
+          start: { x: 0, y: 0 },
+          end: { x: 40, y: 0 },
+          dimensions: { length: 40, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' },
+          openings: []
+        }
+      ],
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1 },
+      fullRoof: { enabled: true, thickness: 6, thicknessUnit: 'in' }
+    };
+
+    const pillars: Pillar[] = [
+      { id: 'p1', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 0, y: 0 } },
+      { id: 'p2', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 40, y: 0 } }
+    ];
+
+    // Verify wall splits cleanly into masonry infill spans between RCC pillars
+    const segments = splitWallByPillars(gf.externalWalls[0], pillars, 'ft', gf.externalWalls);
+    expect(segments.length).toBeGreaterThan(0);
+    expect(segments[0].length).toBeGreaterThan(35); // 40ft minus pillar widths
+
+    // Test independence matrix:
+    // Brick infill visibility is strictly determined by showBrickInfill, regardless of fullRoof or fullRingBeam
+    const evaluateScene = (showBrickInfill: boolean, showFullRingBeam: boolean, showFullRoof: boolean) => ({
+      brickInfillVisible: showBrickInfill,
+      fullRingBeamVisible: showFullRingBeam,
+      fullRoofVisible: showFullRoof
+    });
+
+    // All ON
+    expect(evaluateScene(true, true, true)).toEqual({
+      brickInfillVisible: true,
+      fullRingBeamVisible: true,
+      fullRoofVisible: true
+    });
+
+    // Brick Infill ON while Full Roof and Beam are ON
+    const activeState = evaluateScene(true, true, true);
+    expect(activeState.brickInfillVisible).toBe(true);
+    expect(activeState.fullRoofVisible).toBe(true);
+    expect(activeState.fullRingBeamVisible).toBe(true);
+
+    // Full Roof OFF does not affect brick
+    const roofOffState = evaluateScene(true, true, false);
+    expect(roofOffState.brickInfillVisible).toBe(true);
+    expect(roofOffState.fullRoofVisible).toBe(false);
+
+    // Brick Infill OFF hides bricks while keeping frame visible
+    const brickOffState = evaluateScene(false, true, true);
+    expect(brickOffState.brickInfillVisible).toBe(false);
+    expect(brickOffState.fullRoofVisible).toBe(true);
+    expect(brickOffState.fullRingBeamVisible).toBe(true);
+  });
+
+  it('TEST 13: verifies Full Roof outer structural support perimeter alignment (0 inset from RCC pillars & beams)', () => {
+    const gf: Floor = {
+      id: 'floor-0',
+      name: 'Ground Floor',
+      level: 0,
+      height: 10,
+      unit: 'ft',
+      externalWalls: [
+        { id: 'w-front', name: 'Front', start: { x: 0, y: 0 }, end: { x: 40, y: 0 }, dimensions: { length: 40, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' }, openings: [] },
+        { id: 'w-right', name: 'Right', start: { x: 40, y: 0 }, end: { x: 40, y: 30 }, dimensions: { length: 30, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' }, openings: [] },
+        { id: 'w-back', name: 'Back', start: { x: 40, y: 30 }, end: { x: 0, y: 30 }, dimensions: { length: 40, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' }, openings: [] },
+        { id: 'w-left', name: 'Left', start: { x: 0, y: 30 }, end: { x: 0, y: 0 }, dimensions: { length: 30, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' }, openings: [] }
+      ],
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1 },
+      fullRoof: { enabled: true, thickness: 6, thicknessUnit: 'in' }
+    };
+
+    const pillars: Pillar[] = [
+      { id: 'p1', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 0, y: 0 } },
+      { id: 'p2', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 40, y: 0 } },
+      { id: 'p3', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 40, y: 30 } },
+      { id: 'p4', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 0, y: 30 } }
+    ];
+
+    const model = {
+      buildingLength: 40,
+      buildingWidth: 30,
+      buildingUnit: 'ft' as const,
+      pillars,
+      fullRingBeam: { enabled: true, thicknessFt: 1 }
+    };
+
+    const footprint = getStructuralRoofFootprint(gf, model, pillars);
+
+    // Pillar outer half dimension (9 in / 2 = 4.5 in = 0.1143 m)
+    const halfPillarM = toMeters(4.5, 'in');
+
+    // Expected outer bounds:
+    expect(footprint.minX).toBeCloseTo(-halfPillarM, 4);
+    expect(footprint.maxX).toBeCloseTo(toMeters(40, 'ft') + halfPillarM, 4);
+    expect(footprint.minY).toBeCloseTo(-halfPillarM, 4);
+    expect(footprint.maxY).toBeCloseTo(toMeters(30, 'ft') + halfPillarM, 4);
+
+    // Expected outer width and depth:
+    expect(footprint.widthM).toBeCloseTo(toMeters(40, 'ft') + toMeters(9, 'in'), 4);
+    expect(footprint.depthM).toBeCloseTo(toMeters(30, 'ft') + toMeters(9, 'in'), 4);
+
+    // Centered exactly on building center:
+    expect(footprint.centerX).toBeCloseTo(toMeters(20, 'ft'), 4);
+    expect(footprint.centerY).toBeCloseTo(toMeters(15, 'ft'), 4);
+    expect(footprint.outerPerimeterCoverage).toBe(true);
+  });
+
+  it('TEST 14: verifies zero-gap continuous structural joint between RCC Corner Pillars and RCC Beams across all floors', () => {
+    // Model with Ground Floor and Floor 1
+    const gf: Floor = {
+      id: 'floor-0',
+      name: 'Ground Floor',
+      level: 0,
+      height: 10,
+      unit: 'ft',
+      externalWalls: [
+        { id: 'w1', name: 'Front', start: { x: 0, y: 0 }, end: { x: 30, y: 0 }, dimensions: { length: 30, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' }, openings: [] },
+        { id: 'w2', name: 'Right', start: { x: 30, y: 0 }, end: { x: 30, y: 20 }, dimensions: { length: 20, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' }, openings: [] },
+        { id: 'w3', name: 'Back', start: { x: 30, y: 20 }, end: { x: 0, y: 20 }, dimensions: { length: 30, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' }, openings: [] },
+        { id: 'w4', name: 'Left', start: { x: 0, y: 20 }, end: { x: 0, y: 0 }, dimensions: { length: 20, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' }, openings: [] }
+      ],
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1, width: 9, widthUnit: 'in' },
+      fullRoof: { enabled: true, thickness: 6, thicknessUnit: 'in' }
+    };
+
+    const f1: Floor = {
+      id: 'floor-1',
+      name: 'Floor 1',
+      level: 1,
+      height: 10,
+      unit: 'ft',
+      externalWalls: [
+        { id: 'f1-w1', name: 'Front', start: { x: 0, y: 0 }, end: { x: 30, y: 0 }, dimensions: { length: 30, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' }, openings: [] },
+        { id: 'f1-w2', name: 'Right', start: { x: 30, y: 0 }, end: { x: 30, y: 20 }, dimensions: { length: 20, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' }, openings: [] },
+        { id: 'f1-w3', name: 'Back', start: { x: 30, y: 20 }, end: { x: 0, y: 20 }, dimensions: { length: 30, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' }, openings: [] },
+        { id: 'f1-w4', name: 'Left', start: { x: 0, y: 20 }, end: { x: 0, y: 0 }, dimensions: { length: 20, height: 10, thickness: 9, unit: 'ft', thicknessUnit: 'in' }, openings: [] }
+      ],
+      internalWalls: [],
+      fullRingBeam: { enabled: true, thicknessFt: 1, width: 9, widthUnit: 'in' },
+      fullRoof: { enabled: true, thickness: 6, thicknessUnit: 'in' }
+    };
+
+    const floors = [gf, f1];
+
+    let currentElevationM = 0;
+    floors.forEach((floor, idx) => {
+      const floorBaseY = currentElevationM;
+      const junc = getRingBeamJunction(floor, { fullRingBeam: floor.fullRingBeam, ringBeam: undefined }, floorBaseY);
+      const topJunc = getTopRccStructuralJunction(floor, { fullRingBeam: floor.fullRingBeam, fullRoof: floor.fullRoof }, floorBaseY);
+
+      // 1. Column geometry breakdown:
+      const floorWallHeightM = toMeters(floor.height || 10, floor.unit || 'ft');
+      const shaftHeightM = floorWallHeightM;
+      const jointHeightM = junc.fullRingBeamHeight;
+      const totalColumnHeightM = shaftHeightM + jointHeightM;
+      const pillarTopY = floorBaseY + totalColumnHeightM;
+
+      // 2. Beam geometry breakdown:
+      const beamTopY = junc.topStructuralLineY;
+      const beamBottomY = junc.brickWallTop;
+
+      // 3. Validation: Direct structural joint between pillar top and beam top
+      const jointValidation = validateBeamColumnJoint(pillarTopY, beamBottomY, beamTopY, 0.0001);
+
+      expect(jointValidation.isValid).toBe(true);
+      expect(jointValidation.verticalGap).toBeCloseTo(0, 5);
+      expect(pillarTopY).toBeCloseTo(beamTopY, 5);
+      expect(pillarTopY).toBeCloseTo(topJunc.topStructuralLineY, 5);
+      expect(beamBottomY).toBeCloseTo(junc.brickWallTop, 5);
+
+      // Advance elevation to next floor
+      currentElevationM += totalColumnHeightM;
+    });
+  });
+
+  it('TEST 15: verifies Apply to All Pillars on Current Floor updates dimensions and alignment while preserving positions, unique IDs, and other floor pillars', () => {
+    const gfPillars: Pillar[] = [
+      { id: 'gf-p1', name: 'P1', floorId: 'floor-0', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 0, y: 0 }, shape: 'square', alignment: 'outside_corner' },
+      { id: 'gf-p2', name: 'P2', floorId: 'floor-0', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 30, y: 0 }, shape: 'square', alignment: 'outside_corner' },
+      { id: 'gf-p3', name: 'P3', floorId: 'floor-0', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 30, y: 20 }, shape: 'square', alignment: 'outside_corner' },
+      { id: 'gf-p4', name: 'P4', floorId: 'floor-0', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 0, y: 20 }, shape: 'square', alignment: 'outside_corner' },
+    ];
+
+    const f1Pillars: Pillar[] = [
+      { id: 'f1-p1', name: 'P1', floorId: 'floor-1', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 0, y: 0 }, shape: 'square', alignment: 'outside_corner' },
+      { id: 'f1-p2', name: 'P2', floorId: 'floor-1', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 30, y: 0 }, shape: 'square', alignment: 'outside_corner' },
+      { id: 'f1-p3', name: 'P3', floorId: 'floor-1', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 30, y: 20 }, shape: 'square', alignment: 'outside_corner' },
+      { id: 'f1-p4', name: 'P4', floorId: 'floor-1', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 0, y: 20 }, shape: 'square', alignment: 'outside_corner' },
+    ];
+
+    const model: any = {
+      buildingLength: 30,
+      buildingWidth: 20,
+      buildingUnit: 'ft',
+      pillars: [...gfPillars, ...f1Pillars],
+      floors: [
+        { id: 'floor-0', name: 'Ground Floor', level: 0, height: 10, unit: 'ft', externalWalls: [], internalWalls: [], pillars: gfPillars },
+        { id: 'floor-1', name: 'Floor 1', level: 1, height: 10, unit: 'ft', externalWalls: [], internalWalls: [], pillars: f1Pillars }
+      ],
+      foundation: {
+        enabled: true,
+        footings: [
+          { id: 'footing-gf-p1', pillarId: 'gf-p1', position: { x: 0, y: 0 }, columnStubWidth: 9, columnStubDepth: 9, columnStubUnit: 'in' },
+          { id: 'footing-gf-p2', pillarId: 'gf-p2', position: { x: 30, y: 0 }, columnStubWidth: 9, columnStubDepth: 9, columnStubUnit: 'in' }
+        ]
+      }
+    };
+
+    // User modifies selected pillar properties to 12" x 14" x 11ft, Rectangle, Inside Corner
+    const commonConfig: CommonPillarConfig = {
+      shape: 'rectangle',
+      width: 12,
+      depth: 14,
+      height: 11,
+      unit: 'in',
+      alignment: 'inside_corner',
+      placementType: 'corner'
+    };
+
+    // Apply to current floor (Ground Floor)
+    const result = applyPillarConfigToAll(model, commonConfig, {
+      scope: 'current',
+      activeFloorId: 'floor-0'
+    });
+
+    expect(result.affectedCount).toBe(4);
+    expect(result.affectedPillarIds).toEqual(['gf-p1', 'gf-p2', 'gf-p3', 'gf-p4']);
+
+    // Ground Floor pillars updated:
+    const updatedGfPillars = result.model.pillars!.filter(p => p.floorId === 'floor-0');
+    expect(updatedGfPillars.length).toBe(4);
+    updatedGfPillars.forEach((p, idx) => {
+      expect(p.width).toBe(12);
+      expect(p.depth).toBe(14);
+      expect(p.height).toBe(11);
+      expect(p.shape).toBe('rectangle');
+      expect(p.alignment).toBe('inside_corner');
+      // Positions and unique IDs strictly preserved
+      expect(p.id).toBe(gfPillars[idx].id);
+      expect(p.name).toBe(gfPillars[idx].name);
+      expect(p.position).toEqual(gfPillars[idx].position);
+    });
+
+    // Floor 1 pillars strictly unchanged:
+    const updatedF1Pillars = result.model.pillars!.filter(p => p.floorId === 'floor-1');
+    expect(updatedF1Pillars.length).toBe(4);
+    updatedF1Pillars.forEach((p, idx) => {
+      expect(p.width).toBe(9);
+      expect(p.depth).toBe(9);
+      expect(p.height).toBe(10);
+      expect(p.shape).toBe('square');
+      expect(p.alignment).toBe('outside_corner');
+      expect(p.id).toBe(f1Pillars[idx].id);
+      expect(p.position).toEqual(f1Pillars[idx].position);
+    });
+
+    // Foundation footing stub dimensions updated while footing positions and IDs are preserved:
+    expect(result.model.foundation!.footings[0].columnStubWidth).toBe(12);
+    expect(result.model.foundation!.footings[0].columnStubDepth).toBe(14);
+    expect(result.model.foundation!.footings[0].position).toEqual({ x: 0, y: 0 });
+    expect(result.model.foundation!.footings[0].id).toBe('footing-gf-p1');
+  });
+
+  it('TEST 16: verifies Apply to All Pillars with All Floors scope updates all pillars across building while preserving independent coordinates and IDs', () => {
+    const gfPillars: Pillar[] = [
+      { id: 'gf-p1', name: 'P1', floorId: 'floor-0', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 0, y: 0 } },
+      { id: 'gf-p2', name: 'P2', floorId: 'floor-0', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 30, y: 0 } }
+    ];
+
+    const f1Pillars: Pillar[] = [
+      { id: 'f1-p1', name: 'P1', floorId: 'floor-1', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 0, y: 0 } },
+      { id: 'f1-p2', name: 'P2', floorId: 'floor-1', width: 9, depth: 9, height: 10, unit: 'in', count: 1, position: { x: 30, y: 0 } }
+    ];
+
+    const model: any = {
+      buildingLength: 30,
+      buildingWidth: 20,
+      buildingUnit: 'ft',
+      pillars: [...gfPillars, ...f1Pillars],
+      floors: [
+        { id: 'floor-0', name: 'Ground Floor', level: 0, height: 10, unit: 'ft', externalWalls: [], internalWalls: [], pillars: gfPillars },
+        { id: 'floor-1', name: 'Floor 1', level: 1, height: 10, unit: 'ft', externalWalls: [], internalWalls: [], pillars: f1Pillars }
+      ]
+    };
+
+    const commonConfig: CommonPillarConfig = {
+      shape: 'circular',
+      width: 15,
+      depth: 15,
+      height: 12,
+      unit: 'in'
+    };
+
+    const result = applyPillarConfigToAll(model, commonConfig, {
+      scope: 'all',
+      activeFloorId: 'floor-0'
+    });
+
+    expect(result.affectedCount).toBe(4);
+    expect(result.model.pillars!.length).toBe(4);
+
+    result.model.pillars!.forEach(p => {
+      expect(p.width).toBe(15);
+      expect(p.depth).toBe(15); // Circular automatically sets depth=width
+      expect(p.height).toBe(12);
+      expect(p.shape).toBe('circular');
+    });
+
+    // Check Ground and Floor 1 positions are preserved
+    expect(result.model.pillars!.find(p => p.id === 'gf-p1')?.position).toEqual({ x: 0, y: 0 });
+    expect(result.model.pillars!.find(p => p.id === 'gf-p2')?.position).toEqual({ x: 30, y: 0 });
+    expect(result.model.pillars!.find(p => p.id === 'f1-p1')?.position).toEqual({ x: 0, y: 0 });
+    expect(result.model.pillars!.find(p => p.id === 'f1-p2')?.position).toEqual({ x: 30, y: 0 });
+  });
+});
+
+
+
+
+

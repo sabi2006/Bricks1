@@ -2,15 +2,17 @@
 
 import React, { useState, useMemo } from 'react';
 import { useCalculator } from './CalculatorContext';
-import { Download, Share2, Phone, AlertTriangle, ArrowLeft, Info, FileText, Loader2, LandPlot, ShieldAlert } from 'lucide-react';
+import { Download, Share2, Phone, AlertTriangle, ArrowLeft, Info, FileText, Loader2, LandPlot, ShieldAlert, Save, FolderClock, Paintbrush } from 'lucide-react';
 import { VisualEstimator3D } from '../3d/VisualEstimator3D';
+import { SaveProjectModal } from './SaveProjectModal';
+import { ProjectHistoryModal } from './ProjectHistoryModal';
 
 const WhatsAppIcon = ({ className = "w-5 h-5" }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none" className={className}>
     <path d="M11.99 0C5.367 0 0 5.366 0 11.99c0 2.12.553 4.17 1.603 5.986L.045 24l6.195-1.624C8.01 23.336 9.974 23.98 11.99 23.98 18.614 23.98 24 18.614 24 11.99 24 5.366 18.614 0 11.99 0zm0 21.986c-1.802 0-3.567-.483-5.113-1.397l-.367-.216-3.805.998.997-3.708-.237-.378C2.518 15.698 1.993 13.86 1.993 11.99 1.993 6.467 6.467 1.993 11.99 1.993 17.514 1.993 22.007 6.468 22.007 11.99c0 5.522-4.493 9.996-10.017 9.996zm5.495-7.483c-.302-.15-1.787-.882-2.062-.983-.275-.1-.475-.15-.675.15s-.775.983-.95 1.183c-.175.2-.35.225-.65.075-2.008-1-3.64-2.825-4.225-3.833-.175-.3-.025-.462.125-.612.133-.133.302-.35.452-.525.15-.175.2-.3.3-.5.1-.2.05-.375-.025-.525-.075-.15-.675-1.625-.925-2.225-.242-.584-.488-.505-.675-.514-.175-.008-.375-.008-.575-.008-.2 0-.525.075-.8.375-.275.3-1.05 1.025-1.05 2.5s1.075 2.9 1.225 3.1c.15.2 2.113 3.225 5.113 4.525.713.313 1.263.5 1.7.638.712.225 1.362.187 1.875.112.575-.087 1.787-.725 2.037-1.425.25-.7.25-1.3.175-1.425-.075-.125-.275-.2-.575-.35z"/>
   </svg>
 );
-import { calculateProject, calculateWallMetrics, toSqMeters, CalculatorSettings, Unit } from '@/lib/brickCalculator';
+import { calculateProject, calculateWallMetrics, toSqMeters, CalculatorSettings, Unit, BuildingModel, DEFAULT_PLASTER_CONFIG } from '@/lib/brickCalculator';
 
 function cn(...classes: (string | undefined | null | false)[]) {
   return classes.filter(Boolean).join(' ');
@@ -21,8 +23,80 @@ interface VisualEstimatorResultsProps {
 }
 
 export function VisualEstimatorResults({ onBack }: VisualEstimatorResultsProps) {
-  const { buildingModel, brickType, settings, setActiveTab } = useCalculator();
+  const { buildingModel, brickType, settings, setActiveTab, result, projectName, setBuildingModel } = useCalculator();
   const [isWhatsappLoading, setIsWhatsappLoading] = useState(false);
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+
+  // Apply standard plaster helper (12mm inner, 15mm outer, 6mm RCC)
+  const handleApplyStandardPlaster = () => {
+    if (!buildingModel) return;
+    const updatedModel: BuildingModel = {
+      ...buildingModel,
+      plaster: {
+        ...(buildingModel.plaster || DEFAULT_PLASTER_CONFIG),
+        enabled: true,
+        targetSurface: 'both',
+        targetWallFace: 'both',
+        useCommonInnerSettings: true,
+        useCommonOuterSettings: true,
+        inner: {
+          ...(buildingModel.plaster?.inner || DEFAULT_PLASTER_CONFIG.inner),
+          enabled: true,
+          thickness: 12,
+          thicknessMm: 12,
+          mixRatio: '1:6',
+        },
+        outer: {
+          ...(buildingModel.plaster?.outer || DEFAULT_PLASTER_CONFIG.outer),
+          enabled: true,
+          thickness: 15,
+          thicknessMm: 15,
+          mixRatio: '1:4',
+        },
+        rcc: {
+          ...(buildingModel.plaster?.rcc || DEFAULT_PLASTER_CONFIG.rcc),
+          enabled: true,
+          thickness: 6,
+          thicknessMm: 6,
+          mixRatio: '1:4',
+        },
+        rccSideBeam: {
+          ...(buildingModel.plaster?.rccSideBeam || DEFAULT_PLASTER_CONFIG.rccSideBeam),
+          enabled: true,
+          thickness: 6,
+          thicknessMm: 6,
+          mixRatio: '1:4',
+        },
+      },
+      floors: buildingModel.floors.map(f => ({
+        ...f,
+        plaster: {
+          ...(f.plaster || DEFAULT_PLASTER_CONFIG),
+          enabled: true,
+          inner: { ...(f.plaster?.inner || DEFAULT_PLASTER_CONFIG.inner), enabled: true, thickness: 12, thicknessMm: 12, mixRatio: '1:6' },
+          outer: { ...(f.plaster?.outer || DEFAULT_PLASTER_CONFIG.outer), enabled: true, thickness: 15, thicknessMm: 15, mixRatio: '1:4' },
+          rcc: { ...(f.plaster?.rcc || DEFAULT_PLASTER_CONFIG.rcc), enabled: true, thickness: 6, thicknessMm: 6, mixRatio: '1:4' },
+          rccSideBeam: { ...(f.plaster?.rccSideBeam || DEFAULT_PLASTER_CONFIG.rccSideBeam), enabled: true, thickness: 6, thicknessMm: 6, mixRatio: '1:4' },
+        },
+        externalWalls: (f.externalWalls || []).map(w => ({
+          ...w,
+          plasterOverrides: {
+            inner: { enabled: true, thicknessMm: 12, mixRatio: '1:6' },
+            outer: { enabled: true, thicknessMm: 15, mixRatio: '1:4' },
+          }
+        })),
+        internalWalls: (f.internalWalls || []).map(w => ({
+          ...w,
+          plasterOverrides: {
+            inner: { enabled: true, thicknessMm: 12, mixRatio: '1:6' },
+            outer: { enabled: false, thicknessMm: 15, mixRatio: '1:4' },
+          }
+        }))
+      }))
+    };
+    setBuildingModel(updatedModel);
+  };
 
   // Local Editable States for Calculation
   const [wastagePercent, setWastagePercent] = useState<number>(settings.wastagePercentage || 5);
@@ -164,10 +238,13 @@ export function VisualEstimatorResults({ onBack }: VisualEstimatorResultsProps) 
   
   // Cost Calculations
   const materialCost = computedResult.costs.total; // Excludes labour, includes transport from localSettings
-  const rccTotal = computedResult.rccPillarEstimate?.costs.total || 0;
+  const rccTotal = computedResult.rccProjectEstimate?.costs.total || 0;
+  const foundationTotal = computedResult.foundationEstimate?.costs.total || 0;
+  const plasterTotal = computedResult.plasterEstimate?.costs.total || 0;
   
-  const contingencyAmount = (materialCost + totalLabourCost + rccTotal) * (contingencyPercent / 100);
-  const grandTotal = materialCost + totalLabourCost + rccTotal + contingencyAmount;
+  const totalBaseWorks = materialCost + totalLabourCost + rccTotal + foundationTotal + plasterTotal;
+  const contingencyAmount = totalBaseWorks * (contingencyPercent / 100);
+  const grandTotal = totalBaseWorks + transportCost + contingencyAmount;
 
   const handleWhatsapp = () => {
     setIsWhatsappLoading(true);
@@ -198,7 +275,19 @@ Please contact me.`;
           )}
           <h2 className="text-2xl font-bold text-gray-900">Comprehensive AI Building Estimate</h2>
         </div>
-        <div className="flex space-x-3">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button 
+            onClick={() => setIsSaveModalOpen(true)} 
+            className="inline-flex items-center px-4 py-2 border border-orange-500 rounded-md shadow-sm text-sm font-bold text-white bg-orange-600 hover:bg-orange-700 transition-colors"
+          >
+            <Save className="h-4 w-4 mr-2" /> Save to History
+          </button>
+          <button 
+            onClick={() => setIsHistoryModalOpen(true)} 
+            className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+          >
+            <FolderClock className="h-4 w-4 mr-2 text-orange-600" /> History
+          </button>
           <button onClick={() => window.print()} className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
             <Download className="h-4 w-4 mr-2 text-gray-500" /> Print / PDF
           </button>
@@ -474,6 +563,771 @@ Please contact me.`;
         </div>
 
       </div>
+
+      {/* 2b. DEDICATED PLASTER / CEMENT FINISH ESTIMATE (Immediately follows Brick Masonry, Requirement 42) */}
+      {(() => {
+        const plEst = computedResult.plasterEstimate;
+        const isPlasterApplied = plEst && plEst.totalNetPlasterAreaSqFt > 0;
+
+        // If plaster is not applied yet, show clear status card with quick apply and customize buttons
+        if (!isPlasterApplied) {
+          return (
+            <div className="bg-gradient-to-br from-teal-950/10 via-slate-900/5 to-teal-900/10 rounded-2xl shadow-md border border-teal-200/80 overflow-hidden mt-8 p-6 transition-all hover:shadow-lg">
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-2xl">🎨</span>
+                    <h3 className="text-xl font-bold text-slate-900">
+                      Plaster &amp; Cement Finish Estimate
+                    </h3>
+                    <span className="px-2.5 py-0.5 text-xs font-bold rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                      Status: Not Applied (0 sq.ft)
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 max-w-2xl leading-relaxed">
+                    Cement plaster finish (12mm Inner Masonry, 15mm Outer Masonry, 6mm RCC Columns &amp; Side Beams) has not been applied to this building yet. When enabled, plaster accurately calculates cement bags and fine sand without altering wall brickwork or beam geometry.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={handleApplyStandardPlaster}
+                    className="px-4 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-teal-500/20 flex items-center gap-2 transition-all hover:scale-[1.02] cursor-pointer"
+                  >
+                    <span>⚡</span>
+                    <span>Apply Standard Plaster (12mm + 15mm + 6mm Column &amp; Side Beam)</span>
+                  </button>
+                  {onBack && (
+                    <button
+                      onClick={onBack}
+                      className="px-4 py-2.5 bg-white hover:bg-slate-50 text-teal-800 border border-teal-300 rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Paintbrush className="w-3.5 h-3.5 text-teal-600" />
+                      <span>Open Plaster Editor</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        // When plaster IS applied
+        return (
+          <div className="bg-white rounded-2xl shadow-xl border border-teal-200/80 overflow-hidden mt-8 transition-all hover:shadow-2xl">
+            {/* Header with gradient badge */}
+            <div className="bg-gradient-to-r from-teal-950 via-slate-900 to-slate-900 px-6 py-5 border-b border-teal-800/60 text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <h3 className="text-xl font-bold flex items-center gap-2.5">
+                  <span className="text-2xl">🎨</span> Live Plaster &amp; Cement Finish Estimate
+                </h3>
+                <p className="text-xs text-teal-200/90 mt-1">
+                  Layer-by-layer surface estimation: Inner Masonry (12mm, 1:6) + Outer Masonry (15mm, 1:4) + RCC Columns &amp; Side Beams (6mm, 1:4) with opening deductions (IS 1200 Part XII).
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="bg-teal-500/20 text-teal-300 border border-teal-500/40 text-xs px-3 py-1.5 rounded-lg font-bold font-mono">
+                  {plEst.totalNetPlasterAreaSqFt.toFixed(1)} sq.ft ({plEst.totalNetPlasterAreaSqM.toFixed(1)} m²)
+                </span>
+                <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs px-3 py-1.5 rounded-lg font-bold font-mono">
+                  Plaster Cost: ₹{Math.round(plEst.costs.total).toLocaleString('en-IN')}
+                </span>
+                {onBack && (
+                  <button
+                    onClick={onBack}
+                    className="px-3 py-1.5 bg-teal-800/80 hover:bg-teal-700 text-teal-100 border border-teal-600/60 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Paintbrush className="w-3.5 h-3.5" />
+                    <span>Edit Plaster</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="p-6 space-y-8">
+              {/* Layer Highlights Grid (8 cards) */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 text-center">
+                <div className="p-2.5 bg-teal-50/70 border border-teal-200/70 rounded-xl">
+                  <span className="text-[10px] uppercase font-bold text-teal-800 block">📐 Total Plaster Area</span>
+                  <span className="font-bold text-slate-900 font-mono text-sm block mt-1">{plEst.totalNetPlasterAreaSqFt.toFixed(1)} sq.ft</span>
+                  <span className="text-[10px] text-slate-500 font-mono">({plEst.totalNetPlasterAreaSqM.toFixed(1)} m²)</span>
+                </div>
+                <div className="p-2.5 bg-teal-50/70 border border-teal-200/70 rounded-xl">
+                  <span className="text-[10px] uppercase font-bold text-teal-800 block">🏠 Inner Plaster</span>
+                  <span className="font-bold text-slate-900 font-mono text-sm block mt-1">{plEst.inner.netAreaSqFt.toFixed(1)} sq.ft</span>
+                  <span className="text-[10px] text-slate-500 font-mono">({plEst.inner.thicknessMm}mm • {plEst.inner.mixRatio})</span>
+                </div>
+                <div className="p-2.5 bg-sky-50/70 border border-sky-200/70 rounded-xl">
+                  <span className="text-[10px] uppercase font-bold text-sky-800 block">🌤️ Outer Plaster</span>
+                  <span className="font-bold text-slate-900 font-mono text-sm block mt-1">{plEst.outer.netAreaSqFt.toFixed(1)} sq.ft</span>
+                  <span className="text-[10px] text-slate-500 font-mono">({plEst.outer.thicknessMm}mm • {plEst.outer.mixRatio})</span>
+                </div>
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                  <span className="text-[10px] uppercase font-bold text-slate-700 block">🏛️ RCC Columns</span>
+                  <span className="font-bold text-slate-900 font-mono text-sm block mt-1">{plEst.rcc.netAreaSqFt.toFixed(1)} sq.ft</span>
+                  <span className="text-[10px] text-slate-500 font-mono">({plEst.rcc.thicknessMm}mm • {plEst.rcc.mixRatio})</span>
+                </div>
+                <div className="p-2.5 bg-amber-50/50 border border-amber-200 rounded-xl">
+                  <span className="text-[10px] uppercase font-bold text-amber-900 block">🏗️ Side Beams</span>
+                  <span className="font-bold text-slate-900 font-mono text-sm block mt-1">{plEst.rccSideBeam.netAreaSqFt.toFixed(1)} sq.ft</span>
+                  <span className="text-[10px] text-slate-500 font-mono">({plEst.rccSideBeam.thicknessMm}mm • {plEst.rccSideBeam.mixRatio})</span>
+                </div>
+                <div className="p-2.5 bg-teal-100/70 border border-teal-300 rounded-xl">
+                  <span className="text-[10px] uppercase font-bold text-teal-950 block">📦 Plaster Cement</span>
+                  <span className="font-bold text-teal-900 font-mono text-sm block mt-1">{plEst.totalCementBags.toFixed(1)} Bags</span>
+                  <span className="text-[10px] text-teal-700 font-mono">(50 kg bags)</span>
+                </div>
+                <div className="p-2.5 bg-amber-50/70 border border-amber-300 rounded-xl">
+                  <span className="text-[10px] uppercase font-bold text-amber-900 block">🏖️ Plaster Sand</span>
+                  <span className="font-bold text-amber-900 font-mono text-sm block mt-1">{plEst.totalSandCft.toFixed(1)} CFT</span>
+                  <span className="text-[10px] text-amber-700 font-mono">({plEst.totalSandM3.toFixed(2)} m³ • No Jalli)</span>
+                </div>
+                <div className="p-2.5 bg-blue-50/60 border border-blue-200 rounded-xl">
+                  <span className="text-[10px] uppercase font-bold text-blue-800 block">💧 Curing Water</span>
+                  <span className="font-bold text-slate-900 font-mono text-sm block mt-1">{plEst.totalWaterLitres.toFixed(0)} L</span>
+                  <span className="text-[10px] text-slate-500 font-mono">(~28 L/bag)</span>
+                </div>
+              </div>
+
+              {/* Requirement 44, 45, 46 & New Feature: Four Detailed Breakdown Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Card 1: Inner Plaster (Requirement 44) */}
+                <div className="p-5 rounded-xl border border-teal-200 bg-gradient-to-br from-teal-50/50 via-white to-teal-50/30 flex flex-col justify-between shadow-xs">
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🏠</span>
+                        <h4 className="font-bold text-slate-900 text-sm">Inner Masonry Plaster</h4>
+                      </div>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-100 text-teal-800 border border-teal-300">
+                        {plEst.inner.thicknessMm} mm • {plEst.inner.mixRatio}
+                      </span>
+                    </div>
+                    <div className="space-y-2 text-xs text-slate-700">
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Gross Surface Area:</span>
+                        <span className="font-mono font-medium">{plEst.inner.grossAreaSqFt.toFixed(1)} sq.ft</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Opening Deductions:</span>
+                        <span className="font-mono text-rose-600 font-medium">-{plEst.inner.openingDeductionSqFt.toFixed(1)} sq.ft</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="font-semibold text-slate-800">Net Plaster Area:</span>
+                        <span className="font-mono font-bold text-teal-800">{plEst.inner.netAreaSqFt.toFixed(1)} sq.ft ({plEst.inner.netAreaSqM.toFixed(1)} m²)</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Wet Mortar Volume:</span>
+                        <span className="font-mono font-medium">{plEst.inner.wetVolumeM3.toFixed(2)} m³</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Plaster Cement:</span>
+                        <span className="font-mono font-bold text-teal-700">{plEst.inner.cementBags.toFixed(1)} Bags (50kg)</span>
+                      </div>
+                      <div className="flex justify-between py-1">
+                        <span className="text-slate-500">Plaster Sand:</span>
+                        <span className="font-mono font-bold text-amber-700">{plEst.inner.sandCft.toFixed(1)} CFT ({plEst.inner.sandM3.toFixed(2)} m³)</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-teal-100 flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800">Inner Layer Cost:</span>
+                    <span className="text-sm font-bold font-mono text-teal-900">₹{Math.round(plEst.inner.costs.total).toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+
+                {/* Card 2: Outer Plaster (Requirement 45) */}
+                <div className="p-5 rounded-xl border border-sky-200 bg-gradient-to-br from-sky-50/50 via-white to-sky-50/30 flex flex-col justify-between shadow-xs">
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🌤️</span>
+                        <h4 className="font-bold text-slate-900 text-sm">Outer Masonry Plaster</h4>
+                      </div>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-300">
+                        {plEst.outer.thicknessMm} mm • {plEst.outer.mixRatio}
+                      </span>
+                    </div>
+                    <div className="space-y-2 text-xs text-slate-700">
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Gross Surface Area:</span>
+                        <span className="font-mono font-medium">{plEst.outer.grossAreaSqFt.toFixed(1)} sq.ft</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Opening Deductions:</span>
+                        <span className="font-mono text-rose-600 font-medium">-{plEst.outer.openingDeductionSqFt.toFixed(1)} sq.ft</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="font-semibold text-slate-800">Net Plaster Area:</span>
+                        <span className="font-mono font-bold text-sky-800">{plEst.outer.netAreaSqFt.toFixed(1)} sq.ft ({plEst.outer.netAreaSqM.toFixed(1)} m²)</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Wet Mortar Volume:</span>
+                        <span className="font-mono font-medium">{plEst.outer.wetVolumeM3.toFixed(2)} m³</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Plaster Cement:</span>
+                        <span className="font-mono font-bold text-sky-700">{plEst.outer.cementBags.toFixed(1)} Bags (50kg)</span>
+                      </div>
+                      <div className="flex justify-between py-1">
+                        <span className="text-slate-500">Plaster Sand:</span>
+                        <span className="font-mono font-bold text-amber-700">{plEst.outer.sandCft.toFixed(1)} CFT ({plEst.outer.sandM3.toFixed(2)} m³)</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-sky-100 flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800">Outer Layer Cost:</span>
+                    <span className="text-sm font-bold font-mono text-sky-900">₹{Math.round(plEst.outer.costs.total).toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+
+                {/* Card 3: RCC Column Plaster (Requirement 46) */}
+                <div className="p-5 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50/50 via-white to-slate-50/30 flex flex-col justify-between shadow-xs">
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🏛️</span>
+                        <h4 className="font-bold text-slate-900 text-sm">RCC Column Plaster</h4>
+                      </div>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-800 border border-slate-300">
+                        {plEst.rcc.thicknessMm} mm • {plEst.rcc.mixRatio}
+                      </span>
+                    </div>
+                    <div className="space-y-2 text-xs text-slate-700">
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Exposed RCC Faces:</span>
+                        <span className="font-mono font-medium">Pillars &amp; Columns</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Opening Deductions:</span>
+                        <span className="font-mono text-slate-400">—</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="font-semibold text-slate-800">Net Plaster Area:</span>
+                        <span className="font-mono font-bold text-slate-800">{plEst.rcc.netAreaSqFt.toFixed(1)} sq.ft ({plEst.rcc.netAreaSqM.toFixed(1)} m²)</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Wet Mortar Volume:</span>
+                        <span className="font-mono font-medium">{plEst.rcc.wetVolumeM3.toFixed(2)} m³</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Plaster Cement:</span>
+                        <span className="font-mono font-bold text-slate-700">{plEst.rcc.cementBags.toFixed(1)} Bags (50kg)</span>
+                      </div>
+                      <div className="flex justify-between py-1">
+                        <span className="text-slate-500">Plaster Sand:</span>
+                        <span className="font-mono font-bold text-amber-700">{plEst.rcc.sandCft.toFixed(1)} CFT ({plEst.rcc.sandM3.toFixed(2)} m³)</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800">Column Plaster Cost:</span>
+                    <span className="text-sm font-bold font-mono text-slate-900">₹{Math.round(plEst.rcc.costs.total).toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+
+                {/* Card 4: RCC Side Beam Plaster */}
+                <div className="p-5 rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50/40 via-white to-amber-50/20 flex flex-col justify-between shadow-xs">
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🏗️</span>
+                        <h4 className="font-bold text-slate-900 text-sm">RCC Side Beam Plaster</h4>
+                      </div>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                        {plEst.rccSideBeam.thicknessMm} mm • {plEst.rccSideBeam.mixRatio}
+                      </span>
+                    </div>
+                    <div className="space-y-2 text-xs text-slate-700">
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Exposed Beam Faces:</span>
+                        <span className="font-mono font-medium">Both Side Faces (Excl. Top/Soffit)</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Opening Deductions:</span>
+                        <span className="font-mono text-slate-400">—</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="font-semibold text-slate-800">Net Plaster Area:</span>
+                        <span className="font-mono font-bold text-amber-900">{plEst.rccSideBeam.netAreaSqFt.toFixed(1)} sq.ft ({plEst.rccSideBeam.netAreaSqM.toFixed(1)} m²)</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Wet Mortar Volume:</span>
+                        <span className="font-mono font-medium">{plEst.rccSideBeam.wetVolumeM3.toFixed(2)} m³</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-500">Plaster Cement:</span>
+                        <span className="font-mono font-bold text-amber-800">{plEst.rccSideBeam.cementBags.toFixed(1)} Bags (50kg)</span>
+                      </div>
+                      <div className="flex justify-between py-1">
+                        <span className="text-slate-500">Plaster Sand:</span>
+                        <span className="font-mono font-bold text-amber-700">{plEst.rccSideBeam.sandCft.toFixed(1)} CFT ({plEst.rccSideBeam.sandM3.toFixed(2)} m³)</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-amber-100 flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800">Side Beam Plaster Cost:</span>
+                    <span className="text-sm font-bold font-mono text-amber-900">₹{Math.round(plEst.rccSideBeam.costs.total).toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Requirement 43: Bill of Quantities (BOQ) Table */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
+                  <span>📜 Requirement 43: Plaster Bill of Quantities (BOQ) Schedule</span>
+                  <span className="text-teal-700 font-semibold text-[11px]">IS 1200 Part XII Method of Measurement</span>
+                </h4>
+                <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                  <table className="min-w-full divide-y divide-slate-200 text-xs">
+                    <thead className="bg-slate-50 text-slate-600 uppercase font-semibold">
+                      <tr>
+                        <th className="py-2.5 px-4 text-left">BOQ Item Description</th>
+                        <th className="py-2.5 px-4 text-right">Quantity</th>
+                        <th className="py-2.5 px-4 text-center">Unit</th>
+                        <th className="py-2.5 px-4 text-right">Unit Rate (₹)</th>
+                        <th className="py-2.5 px-4 text-right">Amount (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
+                      <tr>
+                        <td className="py-2.5 px-4">
+                          <span className="font-bold text-slate-900 block">Inner Masonry Cement Plaster</span>
+                          <span className="text-[11px] text-slate-500">{plEst.inner.thicknessMm}mm thick, 1:6 cement sand mortar with smooth finish ready for putty</span>
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-teal-800">{plEst.inner.netAreaSqFt.toFixed(1)}</td>
+                        <td className="py-2.5 px-4 text-center text-slate-500">sq.ft</td>
+                        <td className="py-2.5 px-4 text-right font-mono">₹{(plEst.inner.costs.total / (plEst.inner.netAreaSqFt || 1)).toFixed(1)}</td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">₹{Math.round(plEst.inner.costs.total).toLocaleString('en-IN')}</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2.5 px-4">
+                          <span className="font-bold text-slate-900 block">Outer Masonry Cement Plaster</span>
+                          <span className="text-[11px] text-slate-500">{plEst.outer.thicknessMm}mm thick, 1:4 weather-resistant cement mortar with sand-faced finish</span>
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-sky-800">{plEst.outer.netAreaSqFt.toFixed(1)}</td>
+                        <td className="py-2.5 px-4 text-center text-slate-500">sq.ft</td>
+                        <td className="py-2.5 px-4 text-right font-mono">₹{(plEst.outer.costs.total / (plEst.outer.netAreaSqFt || 1)).toFixed(1)}</td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">₹{Math.round(plEst.outer.costs.total).toLocaleString('en-IN')}</td>
+                      </tr>
+                      {plEst.rcc.netAreaSqFt > 0 && (
+                        <tr>
+                          <td className="py-2.5 px-4">
+                            <span className="font-bold text-slate-900 block">RCC Column Plaster Finish</span>
+                            <span className="text-[11px] text-slate-500">{plEst.rcc.thicknessMm}mm thick, 1:4 cement mortar with hacking / bonding slurry coat</span>
+                          </td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-800">{plEst.rcc.netAreaSqFt.toFixed(1)}</td>
+                          <td className="py-2.5 px-4 text-center text-slate-500">sq.ft</td>
+                          <td className="py-2.5 px-4 text-right font-mono">₹{(plEst.rcc.costs.total / (plEst.rcc.netAreaSqFt || 1)).toFixed(1)}</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">₹{Math.round(plEst.rcc.costs.total).toLocaleString('en-IN')}</td>
+                        </tr>
+                      )}
+                      {plEst.rccSideBeam.netAreaSqFt > 0 && (
+                        <tr>
+                          <td className="py-2.5 px-4">
+                            <span className="font-bold text-slate-900 block">RCC Side Beam Plaster Finish</span>
+                            <span className="text-[11px] text-slate-500">{plEst.rccSideBeam.thicknessMm}mm thick, {plEst.rccSideBeam.mixRatio} mortar on exposed side faces (excl. top/soffit)</span>
+                          </td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-amber-900">{plEst.rccSideBeam.netAreaSqFt.toFixed(1)}</td>
+                          <td className="py-2.5 px-4 text-center text-slate-500">sq.ft</td>
+                          <td className="py-2.5 px-4 text-right font-mono">₹{(plEst.rccSideBeam.costs.total / (plEst.rccSideBeam.netAreaSqFt || 1)).toFixed(1)}</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">₹{Math.round(plEst.rccSideBeam.costs.total).toLocaleString('en-IN')}</td>
+                        </tr>
+                      )}
+                      <tr>
+                        <td className="py-2.5 px-4">
+                          <span className="font-bold text-slate-900 block">Plaster Cement (PPC/OPC 50kg Bags)</span>
+                          <span className="text-[11px] text-slate-500">Segregated exclusively for plaster mortar (dry volume conversion factor 1.33)</span>
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-teal-700">{Math.ceil(plEst.totalCementBags)}</td>
+                        <td className="py-2.5 px-4 text-center text-slate-500">Bags</td>
+                        <td className="py-2.5 px-4 text-right font-mono">₹{cementPrice}</td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">₹{Math.round(plEst.totalCementBags * cementPrice).toLocaleString('en-IN')}</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2.5 px-4">
+                          <span className="font-bold text-slate-900 block">Plaster Sand / Fine M-Sand</span>
+                          <span className="text-[11px] text-rose-600 font-semibold">Fine sand strictly with NO 20mm jalli / coarse aggregates</span>
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-amber-700">{Math.ceil(plEst.totalSandCft)}</td>
+                        <td className="py-2.5 px-4 text-center text-slate-500">CFT</td>
+                        <td className="py-2.5 px-4 text-right font-mono">₹{sandPrice}</td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">₹{Math.round(plEst.totalSandCft * sandPrice).toLocaleString('en-IN')}</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2.5 px-4">
+                          <span className="font-bold text-slate-900 block">Plaster Application Labour (Mason + Helper)</span>
+                          <span className="text-[11px] text-slate-500">Based on standard ~9.5 m² per mason-helper team per day</span>
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono text-slate-700">{plEst.totalLabourDays.toFixed(1)}</td>
+                        <td className="py-2.5 px-4 text-center text-slate-500">Days</td>
+                        <td className="py-2.5 px-4 text-right font-mono">₹850 / ₹550</td>
+                        <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">₹{Math.round(plEst.costs.labour).toLocaleString('en-IN')}</td>
+                      </tr>
+                      <tr className="bg-teal-50/80 font-extrabold text-slate-900">
+                        <td colSpan={4} className="py-3 px-4 text-right border-t border-teal-300 text-sm">
+                          Total Plaster &amp; Cement Finish BOQ Amount
+                        </td>
+                        <td className="py-3 px-4 text-right border-t border-teal-300 text-sm text-teal-800 font-mono">
+                          ₹{Math.round(plEst.costs.total).toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Floor-by-Floor Itemized Schedule */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
+                  <span>📋 Floor-by-Floor Plaster Itemized Schedule</span>
+                  <span className="text-slate-400 font-normal">{plEst.floors.length} Floors Configured</span>
+                </h4>
+                <div className="border border-slate-200 rounded-xl overflow-x-auto shadow-xs">
+                  <table className="min-w-full divide-y divide-slate-200 text-xs">
+                    <thead className="bg-slate-50 text-slate-600 uppercase font-semibold">
+                      <tr>
+                        <th className="py-2.5 px-3 text-left">Floor Level</th>
+                        <th className="py-2.5 px-3 text-left">Surface Category</th>
+                        <th className="py-2.5 px-3 text-center">Thickness</th>
+                        <th className="py-2.5 px-3 text-center">Mix Ratio</th>
+                        <th className="py-2.5 px-3 text-right">Gross Area</th>
+                        <th className="py-2.5 px-3 text-right">Deductions</th>
+                        <th className="py-2.5 px-3 text-right">Net Area</th>
+                        <th className="py-2.5 px-3 text-right">Wet Mortar</th>
+                        <th className="py-2.5 px-3 text-right">Cement Bags</th>
+                        <th className="py-2.5 px-3 text-right">Plaster Sand</th>
+                        <th className="py-2.5 px-3 text-right">Surface Cost</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
+                      {plEst.floors.map(fl => (
+                        <React.Fragment key={fl.floorId}>
+                          {fl.inner.netAreaSqFt > 0 && (
+                            <tr className="hover:bg-teal-50/40 transition-colors">
+                              <td className="py-2.5 px-3 font-bold text-slate-900">{fl.floorName}</td>
+                              <td className="py-2.5 px-3 font-semibold text-teal-800">🏠 Inner Masonry Plaster</td>
+                              <td className="py-2.5 px-3 text-center font-mono">{fl.inner.thicknessMm} mm</td>
+                              <td className="py-2.5 px-3 text-center font-mono bg-teal-50/50">{fl.inner.mixRatio}</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-slate-600">{fl.inner.grossAreaSqFt.toFixed(1)} sq.ft</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-rose-600">-{fl.inner.openingDeductionSqFt.toFixed(1)} sq.ft</td>
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-teal-900">{fl.inner.netAreaSqFt.toFixed(1)} sq.ft</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-slate-600">{fl.inner.wetVolumeM3.toFixed(2)} m³</td>
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-teal-700">{fl.inner.cementBags.toFixed(1)} bags</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-amber-800">{fl.inner.sandCft.toFixed(1)} CFT</td>
+                              <td className="py-2.5 px-3 text-right font-bold text-slate-900">₹{Math.round(fl.inner.costs.total).toLocaleString('en-IN')}</td>
+                            </tr>
+                          )}
+                          {fl.outer.netAreaSqFt > 0 && (
+                            <tr className="hover:bg-sky-50/40 transition-colors">
+                              <td className="py-2.5 px-3 font-bold text-slate-900">{fl.floorName}</td>
+                              <td className="py-2.5 px-3 font-semibold text-sky-800">🌤️ Outer Masonry Plaster</td>
+                              <td className="py-2.5 px-3 text-center font-mono">{fl.outer.thicknessMm} mm</td>
+                              <td className="py-2.5 px-3 text-center font-mono bg-sky-50/50">{fl.outer.mixRatio}</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-slate-600">{fl.outer.grossAreaSqFt.toFixed(1)} sq.ft</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-rose-600">-{fl.outer.openingDeductionSqFt.toFixed(1)} sq.ft</td>
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-sky-900">{fl.outer.netAreaSqFt.toFixed(1)} sq.ft</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-slate-600">{fl.outer.wetVolumeM3.toFixed(2)} m³</td>
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-sky-700">{fl.outer.cementBags.toFixed(1)} bags</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-amber-800">{fl.outer.sandCft.toFixed(1)} CFT</td>
+                              <td className="py-2.5 px-3 text-right font-bold text-slate-900">₹{Math.round(fl.outer.costs.total).toLocaleString('en-IN')}</td>
+                            </tr>
+                          )}
+                          {fl.rcc.netAreaSqFt > 0 && (
+                            <tr className="hover:bg-slate-50 transition-colors">
+                              <td className="py-2.5 px-3 font-bold text-slate-900">{fl.floorName}</td>
+                              <td className="py-2.5 px-3 font-semibold text-slate-700">🏛️ RCC Column Plaster</td>
+                              <td className="py-2.5 px-3 text-center font-mono">{fl.rcc.thicknessMm} mm</td>
+                              <td className="py-2.5 px-3 text-center font-mono bg-slate-100">{fl.rcc.mixRatio}</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-slate-600">{fl.rcc.grossAreaSqFt.toFixed(1)} sq.ft</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-slate-400">—</td>
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-800">{fl.rcc.netAreaSqFt.toFixed(1)} sq.ft</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-slate-600">{fl.rcc.wetVolumeM3.toFixed(2)} m³</td>
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-700">{fl.rcc.cementBags.toFixed(1)} bags</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-amber-800">{fl.rcc.sandCft.toFixed(1)} CFT</td>
+                              <td className="py-2.5 px-3 text-right font-bold text-slate-900">₹{Math.round(fl.rcc.costs.total).toLocaleString('en-IN')}</td>
+                            </tr>
+                          )}
+                          {fl.rccSideBeam.netAreaSqFt > 0 && (
+                            <tr className="hover:bg-amber-50/40 transition-colors">
+                              <td className="py-2.5 px-3 font-bold text-slate-900">{fl.floorName}</td>
+                              <td className="py-2.5 px-3 font-semibold text-amber-900">🏗️ RCC Side Beam Plaster</td>
+                              <td className="py-2.5 px-3 text-center font-mono">{fl.rccSideBeam.thicknessMm} mm</td>
+                              <td className="py-2.5 px-3 text-center font-mono bg-amber-50/50">{fl.rccSideBeam.mixRatio}</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-slate-600">{fl.rccSideBeam.grossAreaSqFt.toFixed(1)} sq.ft</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-slate-400">—</td>
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-amber-950">{fl.rccSideBeam.netAreaSqFt.toFixed(1)} sq.ft</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-slate-600">{fl.rccSideBeam.wetVolumeM3.toFixed(2)} m³</td>
+                              <td className="py-2.5 px-3 text-right font-mono font-bold text-amber-800">{fl.rccSideBeam.cementBags.toFixed(1)} bags</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-amber-800">{fl.rccSideBeam.sandCft.toFixed(1)} CFT</td>
+                              <td className="py-2.5 px-3 text-right font-bold text-slate-900">₹{Math.round(fl.rccSideBeam.costs.total).toLocaleString('en-IN')}</td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Requirement 47 & 48: Material Segregation Tables (Cement & Sand) */}
+              <div className="space-y-6">
+                <div className="border-t border-slate-200 pt-6">
+                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-base">📦</span>
+                      <span>Requirement 47: Segregated Cement Requirement Across Project Phases</span>
+                    </span>
+                    <span className="text-xs text-teal-800 font-mono font-bold">
+                      Project Total: {(
+                        computedResult.cementBags + 
+                        (computedResult.foundationEstimate?.totalCementBags || 0) + 
+                        (computedResult.rccProjectEstimate?.materials.cementBags || 0) + 
+                        plEst.totalCementBags
+                      ).toFixed(1)} Bags
+                    </span>
+                  </h4>
+                  <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                    <table className="min-w-full divide-y divide-slate-200 text-xs">
+                      <thead className="bg-slate-50 text-slate-600 uppercase font-semibold">
+                        <tr>
+                          <th className="py-2.5 px-4 text-left">Construction Stage / Component</th>
+                          <th className="py-2.5 px-4 text-center">Mix Ratio</th>
+                          <th className="py-2.5 px-4 text-left">Specification / Layer</th>
+                          <th className="py-2.5 px-4 text-right">Calculated Bags</th>
+                          <th className="py-2.5 px-4 text-right">Rec. Purchase</th>
+                          <th className="py-2.5 px-4 text-right">Cement Cost (₹)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
+                        <tr>
+                          <td className="py-2.5 px-4 font-bold text-slate-900">Brick Masonry Mortar Joints</td>
+                          <td className="py-2.5 px-4 text-center font-mono">{mortarRatio}</td>
+                          <td className="py-2.5 px-4 text-slate-600">Bedding joints across all floors</td>
+                          <td className="py-2.5 px-4 text-right font-mono">{computedResult.cementBags.toFixed(1)}</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">{Math.ceil(computedResult.cementBags)} Bags</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">₹{Math.round(computedResult.cementBags * cementPrice).toLocaleString('en-IN')}</td>
+                        </tr>
+                        {computedResult.foundationEstimate && (computedResult.foundationEstimate.totalCementBags || 0) > 0 && (
+                          <tr>
+                            <td className="py-2.5 px-4 font-bold text-amber-900">Foundation Substructure (PCC + Footings)</td>
+                            <td className="py-2.5 px-4 text-center font-mono">1:4:8 &amp; 1:1.5:3</td>
+                            <td className="py-2.5 px-4 text-slate-600">PCC Bed + Isolated Footings</td>
+                            <td className="py-2.5 px-4 text-right font-mono text-amber-800">{(computedResult.foundationEstimate.totalCementBags || 0).toFixed(1)}</td>
+                            <td className="py-2.5 px-4 text-right font-mono font-bold text-amber-900">{Math.ceil(computedResult.foundationEstimate.totalCementBags || 0)} Bags</td>
+                            <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">₹{Math.round((computedResult.foundationEstimate.totalCementBags || 0) * cementPrice).toLocaleString('en-IN')}</td>
+                          </tr>
+                        )}
+                        {computedResult.rccProjectEstimate && (computedResult.rccProjectEstimate.materials.cementBags || 0) > 0 && (
+                          <tr>
+                            <td className="py-2.5 px-4 font-bold text-orange-900">RCC Superstructure Frame</td>
+                            <td className="py-2.5 px-4 text-center font-mono">{rccMixRatio}</td>
+                            <td className="py-2.5 px-4 text-slate-600">Pillars, Ring Beams &amp; Roof Slab</td>
+                            <td className="py-2.5 px-4 text-right font-mono text-orange-800">{(computedResult.rccProjectEstimate.materials.cementBags || 0).toFixed(1)}</td>
+                            <td className="py-2.5 px-4 text-right font-mono font-bold text-orange-900">{Math.ceil(computedResult.rccProjectEstimate.materials.cementBags || 0)} Bags</td>
+                            <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">₹{Math.round((computedResult.rccProjectEstimate.materials.cementBags || 0) * cementPrice).toLocaleString('en-IN')}</td>
+                          </tr>
+                        )}
+                        <tr className="bg-teal-50/40">
+                          <td className="py-2.5 px-4 font-bold text-teal-950">🏠 Inner Masonry Plaster Finish</td>
+                          <td className="py-2.5 px-4 text-center font-mono text-teal-800">{plEst.inner.mixRatio}</td>
+                          <td className="py-2.5 px-4 text-teal-700">{plEst.inner.thicknessMm}mm internal walls &amp; partitions</td>
+                          <td className="py-2.5 px-4 text-right font-mono text-teal-800">{plEst.inner.cementBags.toFixed(1)}</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-teal-900">{Math.ceil(plEst.inner.cementBags)} Bags</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-teal-900">₹{Math.round(plEst.inner.cementBags * cementPrice).toLocaleString('en-IN')}</td>
+                        </tr>
+                        <tr className="bg-sky-50/40">
+                          <td className="py-2.5 px-4 font-bold text-sky-950">🌤️ Outer Masonry Plaster Finish</td>
+                          <td className="py-2.5 px-4 text-center font-mono text-sky-800">{plEst.outer.mixRatio}</td>
+                          <td className="py-2.5 px-4 text-sky-700">{plEst.outer.thicknessMm}mm external exposed walls</td>
+                          <td className="py-2.5 px-4 text-right font-mono text-sky-800">{plEst.outer.cementBags.toFixed(1)}</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-sky-900">{Math.ceil(plEst.outer.cementBags)} Bags</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-sky-900">₹{Math.round(plEst.outer.cementBags * cementPrice).toLocaleString('en-IN')}</td>
+                        </tr>
+                        {plEst.rcc.cementBags > 0 && (
+                          <tr className="bg-slate-50">
+                            <td className="py-2.5 px-4 font-bold text-slate-900">🏛️ RCC Column Plaster Finish</td>
+                            <td className="py-2.5 px-4 text-center font-mono text-slate-700">{plEst.rcc.mixRatio}</td>
+                            <td className="py-2.5 px-4 text-slate-600">{plEst.rcc.thicknessMm}mm column exposed surfaces</td>
+                            <td className="py-2.5 px-4 text-right font-mono text-slate-700">{plEst.rcc.cementBags.toFixed(1)}</td>
+                            <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-800">{Math.ceil(plEst.rcc.cementBags)} Bags</td>
+                            <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">₹{Math.round(plEst.rcc.cementBags * cementPrice).toLocaleString('en-IN')}</td>
+                          </tr>
+                        )}
+                        {plEst.rccSideBeam.cementBags > 0 && (
+                          <tr className="bg-amber-50/40">
+                            <td className="py-2.5 px-4 font-bold text-amber-950">🏗️ RCC Side Beam Plaster Finish</td>
+                            <td className="py-2.5 px-4 text-center font-mono text-amber-800">{plEst.rccSideBeam.mixRatio}</td>
+                            <td className="py-2.5 px-4 text-amber-800">{plEst.rccSideBeam.thicknessMm}mm side beam exposed faces (excl. top/soffit)</td>
+                            <td className="py-2.5 px-4 text-right font-mono text-amber-800">{plEst.rccSideBeam.cementBags.toFixed(1)}</td>
+                            <td className="py-2.5 px-4 text-right font-mono font-bold text-amber-900">{Math.ceil(plEst.rccSideBeam.cementBags)} Bags</td>
+                            <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-900">₹{Math.round(plEst.rccSideBeam.cementBags * cementPrice).toLocaleString('en-IN')}</td>
+                          </tr>
+                        )}
+                        <tr className="bg-slate-900 text-white font-bold">
+                          <td colSpan={3} className="py-3 px-4 text-right text-xs uppercase tracking-wider">
+                            Total Combined Project Cement (All Stages)
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono text-emerald-400">
+                            {(
+                              computedResult.cementBags + 
+                              (computedResult.foundationEstimate?.totalCementBags || 0) + 
+                              (computedResult.rccProjectEstimate?.materials.cementBags || 0) + 
+                              plEst.totalCementBags
+                            ).toFixed(1)}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono text-emerald-300 font-extrabold">
+                            {Math.ceil(
+                              computedResult.cementBags + 
+                              (computedResult.foundationEstimate?.totalCementBags || 0) + 
+                              (computedResult.rccProjectEstimate?.materials.cementBags || 0) + 
+                              plEst.totalCementBags
+                            )} Bags
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono text-emerald-400">
+                            ₹{Math.round(
+                              (
+                                computedResult.cementBags + 
+                                (computedResult.foundationEstimate?.totalCementBags || 0) + 
+                                (computedResult.rccProjectEstimate?.materials.cementBags || 0) + 
+                                plEst.totalCementBags
+                              ) * cementPrice
+                            ).toLocaleString('en-IN')}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Requirement 48: Segregated Sand & Aggregates Breakdown */}
+                <div>
+                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-base">🏖️</span>
+                      <span>Requirement 48: Segregated Sand &amp; Aggregates (Strictly NO 20mm Jalli in Plaster)</span>
+                    </span>
+                    <span className="text-xs text-amber-800 font-mono font-bold">
+                      Plaster Sand: {plEst.totalSandCft.toFixed(1)} CFT (Fine M-Sand Only)
+                    </span>
+                  </h4>
+                  <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                    <table className="min-w-full divide-y divide-slate-200 text-xs">
+                      <thead className="bg-slate-50 text-slate-600 uppercase font-semibold">
+                        <tr>
+                          <th className="py-2.5 px-4 text-left">Component</th>
+                          <th className="py-2.5 px-4 text-left">Material Grade / Specification</th>
+                          <th className="py-2.5 px-4 text-right">Sand / Fine Agg (CFT)</th>
+                          <th className="py-2.5 px-4 text-right">Coarse Jalli 20mm/40mm (CFT)</th>
+                          <th className="py-2.5 px-4 text-left">Quality &amp; Technical Rule</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
+                        <tr>
+                          <td className="py-2.5 px-4 font-bold text-slate-900">Brick Masonry Mortar</td>
+                          <td className="py-2.5 px-4 text-slate-600">Coarse River Sand / M-Sand Zone II</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-800">{(computedResult.sandVolume * 35.3147).toFixed(1)}</td>
+                          <td className="py-2.5 px-4 text-right font-mono text-slate-400">— (None)</td>
+                          <td className="py-2.5 px-4 text-slate-500">Free from silt &gt; 5%, screened for joints</td>
+                        </tr>
+                        {computedResult.foundationEstimate && (computedResult.foundationEstimate.totalSandCft || 0) > 0 && (
+                          <tr>
+                            <td className="py-2.5 px-4 font-bold text-amber-900">Foundation Substructure</td>
+                            <td className="py-2.5 px-4 text-slate-600">Concrete Sand + 40mm PCC / 20mm Footings</td>
+                            <td className="py-2.5 px-4 text-right font-mono text-amber-800">{(computedResult.foundationEstimate.totalSandCft || 0).toFixed(1)}</td>
+                            <td className="py-2.5 px-4 text-right font-mono text-amber-800">{(computedResult.foundationEstimate.totalCoarseAggCft || 0).toFixed(1)}</td>
+                            <td className="py-2.5 px-4 text-slate-500">Graded hard granite blue metal for footings</td>
+                          </tr>
+                        )}
+                        {computedResult.rccProjectEstimate && (computedResult.rccProjectEstimate.materials.sandCft || 0) > 0 && (
+                          <tr>
+                            <td className="py-2.5 px-4 font-bold text-orange-900">RCC Structural Frame</td>
+                            <td className="py-2.5 px-4 text-slate-600">Zone II Concrete Sand + 20mm Blue Metal</td>
+                            <td className="py-2.5 px-4 text-right font-mono text-orange-800">{(computedResult.rccProjectEstimate.materials.sandCft || 0).toFixed(1)}</td>
+                            <td className="py-2.5 px-4 text-right font-mono text-orange-800">{(computedResult.rccProjectEstimate.materials.aggregateCft || 0).toFixed(1)}</td>
+                            <td className="py-2.5 px-4 text-slate-500">20mm graded jalli for beam-column cages</td>
+                          </tr>
+                        )}
+                        <tr className="bg-teal-50/50">
+                          <td className="py-2.5 px-4 font-bold text-teal-950">🏠 Inner Masonry Plaster</td>
+                          <td className="py-2.5 px-4 text-teal-800">Fine Plaster Sand / Screened M-Sand</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-teal-800">{plEst.inner.sandCft.toFixed(1)}</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-emerald-600">0.0 (NO Jalli)</td>
+                          <td className="py-2.5 px-4 text-teal-900 font-medium">Fine sieved &lt; 1.5mm for smooth putty ready surface</td>
+                        </tr>
+                        <tr className="bg-sky-50/50">
+                          <td className="py-2.5 px-4 font-bold text-sky-950">🌤️ Outer Masonry Plaster</td>
+                          <td className="py-2.5 px-4 text-sky-800">Medium Plaster Sand / Plaster M-Sand</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-sky-800">{plEst.outer.sandCft.toFixed(1)}</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold text-emerald-600">0.0 (NO Jalli)</td>
+                          <td className="py-2.5 px-4 text-sky-900 font-medium">Sharp angular sand for crack-free weather rendering</td>
+                        </tr>
+                        {plEst.rcc.sandCft > 0 && (
+                          <tr className="bg-slate-50">
+                            <td className="py-2.5 px-4 font-bold text-slate-900">🏛️ RCC Column Plaster</td>
+                            <td className="py-2.5 px-4 text-slate-700">Fine Screened Sand / P-Sand</td>
+                            <td className="py-2.5 px-4 text-right font-mono font-bold text-slate-700">{plEst.rcc.sandCft.toFixed(1)}</td>
+                            <td className="py-2.5 px-4 text-right font-mono font-bold text-emerald-600">0.0 (NO Jalli)</td>
+                            <td className="py-2.5 px-4 text-slate-600 font-medium">Thin 6mm coat directly over concrete column bonding layer</td>
+                          </tr>
+                        )}
+                        {plEst.rccSideBeam.sandCft > 0 && (
+                          <tr className="bg-amber-50/40">
+                            <td className="py-2.5 px-4 font-bold text-amber-950">🏗️ RCC Side Beam Plaster</td>
+                            <td className="py-2.5 px-4 text-amber-800">Fine Screened Sand / P-Sand</td>
+                            <td className="py-2.5 px-4 text-right font-mono font-bold text-amber-900">{plEst.rccSideBeam.sandCft.toFixed(1)}</td>
+                            <td className="py-2.5 px-4 text-right font-mono font-bold text-emerald-600">0.0 (NO Jalli)</td>
+                            <td className="py-2.5 px-4 text-amber-950 font-medium">Thin coat over side beam faces (strictly fine sand)</td>
+                          </tr>
+                        )}
+                        <tr className="bg-amber-100/70 font-bold text-slate-900">
+                          <td colSpan={2} className="py-2.5 px-4 text-right text-xs uppercase">
+                            Total Project Sand Requirement
+                          </td>
+                          <td className="py-2.5 px-4 text-right font-mono text-amber-900 font-extrabold text-sm">
+                            {(
+                              (computedResult.sandVolume * 35.3147) + 
+                              (computedResult.foundationEstimate?.totalSandCft || 0) + 
+                              (computedResult.rccProjectEstimate?.materials.sandCft || 0) + 
+                              plEst.totalSandCft
+                            ).toFixed(1)} CFT
+                          </td>
+                          <td className="py-2.5 px-4 text-right font-mono text-slate-700 font-extrabold text-sm">
+                            {(
+                              (computedResult.foundationEstimate?.totalCoarseAggCft || 0) + 
+                              (computedResult.rccProjectEstimate?.materials.aggregateCft || 0)
+                            ).toFixed(1)} CFT
+                          </td>
+                          <td className="py-2.5 px-4 text-xs text-amber-950 font-bold">
+                            Separate delivery recommended: Plaster sand vs Concrete gravel
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              {/* Engineering Specifications & Notes */}
+              <div className="bg-teal-50/40 p-5 rounded-xl border border-teal-200 space-y-3 text-xs">
+                <h4 className="font-bold text-teal-950 uppercase tracking-wider flex items-center gap-1.5">
+                  <Paintbrush className="w-4 h-4 text-teal-700" />
+                  <span>Plaster Engineering Specifications &amp; Standards</span>
+                </h4>
+                <div className="space-y-2 text-slate-700 leading-relaxed">
+                  <p><b>• Inner Masonry Plaster:</b> 12 mm thickness, mix ratio 1:6 cement mortar. Smooth sponge/trowel finish ready for putty.</p>
+                  <p><b>• Outer Masonry Plaster:</b> 15 mm thickness, rich mix ratio 1:4 cement mortar with weather-resistant sand finish.</p>
+                  <p><b>• RCC Column Plaster:</b> 6 mm thickness, mix ratio 1:4 cement mortar with hacking/bonding coat applied to column surfaces.</p>
+                  <p><b>• RCC Side Beam Plaster:</b> 6 mm thickness, mix ratio 1:4 cement mortar applied strictly to exposed vertical side beam faces (excluding slab-contact top and soffit).</p>
+                  <p><b>• Deductions:</b> Full opening deduction for doors, windows, and ventilators according to IS 1200 Part XII guidelines.</p>
+                  <div className="p-2.5 bg-teal-100/70 border border-teal-300 rounded-lg text-[11px] text-teal-950 leading-relaxed mt-2">
+                    <b>Material Segregation Guarantee:</b> Plaster cement bags and sand are strictly calculated and displayed separately from brick masonry mortar and foundation concrete. Plaster uses sand only (strictly NO 20mm jalli).
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Live RCC Structural Construction Estimate (Pillars, Ring Beams, Full RCC Top) */}
       {computedResult.rccProjectEstimate && computedResult.rccProjectEstimate.totalConcreteVolumeM3 > 0 && (() => {
@@ -802,7 +1656,7 @@ Please contact me.`;
 
             <div className="p-6 space-y-8">
               {/* Layer Volume Highlights */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-center">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 text-center">
                 <div className="p-3 bg-amber-50/70 border border-amber-200/70 rounded-xl">
                   <span className="text-[10px] uppercase font-bold text-amber-800 block">🚜 Total Excavation</span>
                   <span className="font-bold text-slate-900 font-mono text-sm block mt-1">{fnd.totalExcavationVolumeCft.toFixed(1)} CFT</span>
@@ -822,6 +1676,11 @@ Please contact me.`;
                   <span className="text-[10px] uppercase font-bold text-indigo-800 block">🏛️ RCC Footing Concrete</span>
                   <span className="font-bold text-slate-900 font-mono text-sm block mt-1">{fnd.totalFootingVolumeCft.toFixed(1)} CFT</span>
                   <span className="text-[10px] text-slate-500 font-mono">({fnd.totalFootingVolumeM3.toFixed(2)} m³)</span>
+                </div>
+                <div className="p-3 bg-amber-100/70 border border-amber-300 rounded-xl">
+                  <span className="text-[10px] uppercase font-bold text-amber-900 block">🏛️ Column Stubs</span>
+                  <span className="font-bold text-slate-900 font-mono text-sm block mt-1">{(fnd.totalStubVolumeCft ?? 0).toFixed(1)} CFT</span>
+                  <span className="text-[10px] text-slate-500 font-mono">({(fnd.totalStubVolumeM3 ?? 0).toFixed(2)} m³ • RCC)</span>
                 </div>
                 <div className="p-3 bg-cyan-50/60 border border-cyan-200 rounded-xl">
                   <span className="text-[10px] uppercase font-bold text-cyan-800 block">🔩 TMT Steel (Mesh+Starter)</span>
@@ -850,6 +1709,7 @@ Please contact me.`;
                         <th className="py-2.5 px-3 text-center">Sand Fill Depth</th>
                         <th className="py-2.5 px-3 text-center">PCC Base (L×W×T)</th>
                         <th className="py-2.5 px-3 text-center">RCC Footing (L×W×D)</th>
+                        <th className="py-2.5 px-3 text-center">Column Stub (H×W×D)</th>
                         <th className="py-2.5 px-3 text-right">Steel Mesh + Starter</th>
                         <th className="py-2.5 px-3 text-right">Unit Total Cost</th>
                       </tr>
@@ -871,6 +1731,10 @@ Please contact me.`;
                           </td>
                           <td className="py-2.5 px-3 text-center font-mono text-slate-600">
                             {item.footingVolumeCft.toFixed(1)} CFT ({item.concreteGrade})
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-mono text-slate-600">
+                            {item.columnStubHeight ?? 2}' ht ({item.columnStubWidth ?? 9}"×{item.columnStubDepth ?? 9}")
+                            <span className="text-[10px] text-slate-400 block">{(item.stubVolumeCft ?? 0).toFixed(1)} CFT</span>
                           </td>
                           <td className="py-2.5 px-3 text-right font-mono font-bold text-cyan-700">
                             {item.steelKg.toFixed(1)} kg
@@ -929,15 +1793,24 @@ Please contact me.`;
                           <td className="py-2.5 px-4 text-right">₹{footingLabourRate} / m³</td>
                           <td className="py-2.5 px-4 text-right font-bold text-slate-900">₹{Math.round(fnd.costs.footingLabour).toLocaleString('en-IN')}</td>
                         </tr>
+                        {fnd.totalStubVolumeM3 && fnd.totalStubVolumeM3 > 0 ? (
+                          <tr>
+                            <td className="py-2.5 px-4 font-bold text-slate-900">RCC Column Stub Concreting Labour</td>
+                            <td className="py-2.5 px-4 text-right font-mono">{fnd.totalStubVolumeM3.toFixed(2)} m³ ({(fnd.totalStubVolumeCft ?? 0).toFixed(1)} CFT)</td>
+                            <td className="py-2.5 px-4 text-right font-mono text-slate-500">—</td>
+                            <td className="py-2.5 px-4 text-right">₹{footingLabourRate} / m³</td>
+                            <td className="py-2.5 px-4 text-right font-bold text-slate-900">₹{Math.round(fnd.costs.stubLabour ?? 0).toLocaleString('en-IN')}</td>
+                          </tr>
+                        ) : null}
                         <tr>
-                          <td className="py-2.5 px-4 font-bold text-slate-900">Cement (PCC + RCC Footings)</td>
+                          <td className="py-2.5 px-4 font-bold text-slate-900">Cement (PCC + Footings + Stubs)</td>
                           <td className="py-2.5 px-4 text-right font-mono">{fnd.totalCementExactBags.toFixed(1)} Bags</td>
                           <td className="py-2.5 px-4 text-right font-mono font-bold text-orange-600">{fnd.recommendedPurchase.cementBags} Bags</td>
                           <td className="py-2.5 px-4 text-right">₹{cementPrice}</td>
                           <td className="py-2.5 px-4 text-right font-bold text-slate-900">₹{Math.round(fnd.costs.cement).toLocaleString('en-IN')}</td>
                         </tr>
                         <tr>
-                          <td className="py-2.5 px-4 font-bold text-slate-900">M-Sand (PCC + RCC Footings)</td>
+                          <td className="py-2.5 px-4 font-bold text-slate-900">M-Sand (PCC + Footings + Stubs)</td>
                           <td className="py-2.5 px-4 text-right font-mono">{fnd.totalSandCft.toFixed(1)} CFT</td>
                           <td className="py-2.5 px-4 text-right font-mono font-bold text-orange-600">{fnd.recommendedPurchase.sandCft} CFT</td>
                           <td className="py-2.5 px-4 text-right">₹{sandPrice} / CFT</td>
@@ -951,7 +1824,7 @@ Please contact me.`;
                           <td className="py-2.5 px-4 text-right font-bold text-slate-900">₹{Math.round(fnd.costs.aggregate).toLocaleString('en-IN')}</td>
                         </tr>
                         <tr>
-                          <td className="py-2.5 px-4 font-bold text-slate-900">TMT Steel (2-Way Mesh + Starters)</td>
+                          <td className="py-2.5 px-4 font-bold text-slate-900">TMT Steel (Mesh + Stub Starters & Ties)</td>
                           <td className="py-2.5 px-4 text-right font-mono">{fnd.totalSteelKg.toFixed(1)} kg</td>
                           <td className="py-2.5 px-4 text-right font-mono font-bold text-orange-600">{fnd.recommendedPurchase.steelKg} kg</td>
                           <td className="py-2.5 px-4 text-right">₹{steelRate} / kg</td>
@@ -1042,6 +1915,7 @@ Please contact me.`;
           </div>
         );
       })()}
+      {/* Section 4b Plaster Estimate has been relocated directly after Brick Masonry (Section 2b) */}
 
       {/* 5. Cost Summary */}
       <div className="bg-gray-900 rounded-lg shadow-xl overflow-hidden border border-gray-800 text-white mt-8">
@@ -1120,6 +1994,15 @@ Please contact me.`;
                   <td className="py-3 pl-4 text-right font-bold text-amber-400">₹{Math.round(computedResult.foundationEstimate.costs.total).toLocaleString('en-IN')}</td>
                 </tr>
               )}
+              {computedResult.plasterEstimate && computedResult.plasterEstimate.totalNetPlasterAreaSqFt > 0 && (
+                <tr className="bg-teal-950/40 font-semibold text-teal-300">
+                  <td className="py-3 pr-4">Plaster &amp; Cement Finish (Inner + Outer + RCC Columns &amp; Side Beams)</td>
+                  <td className="py-3 px-4 text-right">{computedResult.plasterEstimate.totalNetPlasterAreaSqFt.toFixed(1)}</td>
+                  <td className="py-3 px-4 text-left">sq.ft</td>
+                  <td className="py-3 px-4 text-right">—</td>
+                  <td className="py-3 pl-4 text-right font-bold text-teal-300">₹{Math.round(computedResult.plasterEstimate.costs.total).toLocaleString('en-IN')}</td>
+                </tr>
+              )}
             </tbody>
           </table>
 
@@ -1156,6 +2039,12 @@ Please contact me.`;
                   <span className="text-lg font-semibold text-amber-400">₹{Math.round(computedResult.foundationEstimate.costs.total).toLocaleString('en-IN')}</span>
                 </div>
               )}
+              {computedResult.plasterEstimate && computedResult.plasterEstimate.costs.total > 0 && (
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm text-teal-400 font-medium">Plaster & Finish Cost</span>
+                  <span className="text-lg font-semibold text-teal-400">₹{Math.round(computedResult.plasterEstimate.costs.total).toLocaleString('en-IN')}</span>
+                </div>
+              )}
               <div className="flex justify-between items-center mb-4">
                 <span className="text-sm text-gray-400">Transport & Extras</span>
                 <span className="text-lg font-semibold text-gray-300">₹{Math.round(transportCost + contingencyAmount).toLocaleString('en-IN')}</span>
@@ -1166,7 +2055,7 @@ Please contact me.`;
                   <span className="text-2xl sm:text-3xl font-bold text-orange-500">Final Total Cost</span>
                 </div>
                 <span className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight xl:text-right">
-                  ₹{Math.round(computedResult.costs.total + totalLabourCost + (computedResult.rccProjectEstimate?.costs.total || 0) + (computedResult.foundationEstimate?.costs.total || 0) + transportCost + contingencyAmount).toLocaleString('en-IN')}
+                  ₹{Math.round(computedResult.costs.total + totalLabourCost + (computedResult.rccProjectEstimate?.costs.total || 0) + (computedResult.foundationEstimate?.costs.total || 0) + (computedResult.plasterEstimate?.costs.total || 0) + transportCost + contingencyAmount).toLocaleString('en-IN')}
                 </span>
               </div>
             </div>
@@ -1270,6 +2159,24 @@ Please contact me.`;
         </div>
       </div>
 
+      {/* Save Project Modal */}
+      {buildingModel && (
+        <SaveProjectModal
+          isOpen={isSaveModalOpen}
+          onClose={() => setIsSaveModalOpen(false)}
+          model={buildingModel}
+          brickType={brickType}
+          settings={settings}
+          result={result}
+          defaultName={projectName || 'My Construction Plan'}
+        />
+      )}
+
+      {/* Project History Modal */}
+      <ProjectHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+      />
     </div>
   );
 }

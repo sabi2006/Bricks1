@@ -19,6 +19,7 @@ model User {
   orders    Order[]
   cart      Cart?
   reviews   Review[]
+  savedProjects SavedProject[]
 }
 
 enum Role {
@@ -132,4 +133,29 @@ model Review {
 
   user      User     @relation(fields: [userId], references: [id])
   product   Product  @relation(fields: [productId], references: [id])
+}
+
+model SavedProject {
+  id              String   @id @default(cuid())
+  userId          String?
+  name            String
+  totalBricks     Int
+  totalCost       Float
+  cementBags      Float?
+  sandVolumeCft   Float?
+  buildingLength  Float
+  buildingWidth   Float
+  buildingUnit    String   @default("ft")
+  floorsCount     Int      @default(1)
+  
+  // Full JSON tree for BuildingModel, settings, and calculation results
+  modelData       Json
+  settingsData    Json?
+  brickTypeData   Json?
+  estimationData  Json?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

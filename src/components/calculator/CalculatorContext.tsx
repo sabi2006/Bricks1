@@ -49,6 +49,12 @@ interface CalculatorState {
   setBrickType: (brick: BrickType) => void;
   updateSettings: (settings: Partial<CalculatorSettings>) => void;
   setBuildingModel: (model: BuildingModel | null) => void;
+  loadProject: (projectData: {
+    model: BuildingModel;
+    settings?: Partial<CalculatorSettings>;
+    brickType?: BrickType;
+    projectName?: string;
+  }) => void;
   calculate: () => void;
   reset: () => void;
 }
@@ -156,11 +162,32 @@ export function CalculatorProvider({ children }: { children: ReactNode }) {
     setHasCalculated(false);
   };
 
+  const loadProject = (projectData: {
+    model: BuildingModel;
+    settings?: Partial<CalculatorSettings>;
+    brickType?: BrickType;
+    projectName?: string;
+  }) => {
+    if (projectData.projectName) setProjectName(projectData.projectName);
+    if (projectData.model) {
+      setBuildingModel(projectData.model);
+      if (projectData.model.buildingUnit) setGlobalUnit(projectData.model.buildingUnit);
+    }
+    if (projectData.settings) {
+      setSettings(prev => ({ ...prev, ...projectData.settings }));
+    }
+    if (projectData.brickType) {
+      setBrickType(projectData.brickType);
+    }
+    setActiveTab('visual');
+    setHasCalculated(true);
+  };
+
   return (
     <CalculatorContext.Provider value={{
       activeTab, mode, difficulty, projectName, globalUnit, walls, pillars, brickType, settings, result, hasCalculated, buildingModel,
       setActiveTab, setMode, setDifficulty, setProjectName, setGlobalUnit, setWalls, setPillars, addWall, updateWall, removeWall,
-      addOpening, removeOpening, setBrickType, updateSettings, setBuildingModel, calculate, reset
+      addOpening, removeOpening, setBrickType, updateSettings, setBuildingModel, loadProject, calculate, reset
     }}>
       {children}
     </CalculatorContext.Provider>

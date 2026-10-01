@@ -31,9 +31,18 @@ interface SharedBrickWallProps {
   position?: [number, number, number];
   rotation?: [number, number, number];
   wireframe?: boolean;
+  infillRecess?: boolean;
 }
 
-export function SharedBrickWall({ wall, brickType, settings, position = [0, 0, 0], rotation = [0, 0, 0], wireframe = false }: SharedBrickWallProps) {
+export function SharedBrickWall({ 
+  wall, 
+  brickType, 
+  settings, 
+  position = [0, 0, 0], 
+  rotation = [0, 0, 0], 
+  wireframe = false,
+  infillRecess = true
+}: SharedBrickWallProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   
   // Memoize brick positions to avoid recalculating on every render
@@ -41,7 +50,10 @@ export function SharedBrickWall({ wall, brickType, settings, position = [0, 0, 0
     const l = toMeters(wall.dimensions.length, wall.dimensions.unit);
     const h = Math.min(20, toMeters(wall.dimensions.height, wall.dimensions.unit)); // Cap at 20m for sanity
     const tUnit = wall.dimensions.thicknessUnit || (wall.dimensions.unit === 'ft' ? 'in' : 'mm');
-    const t = Math.min(2, toMeters(wall.dimensions.thickness, tUnit)); // Cap at 2m
+    const rawT = Math.min(2, toMeters(wall.dimensions.thickness, tUnit)); // Cap at 2m
+    // Infill Recess: Inset brick infill slightly (~16mm on each face) so the RCC columns & beams project proudly in front of the masonry
+    const recess = infillRecess !== false ? 0.016 : 0;
+    const t = Math.max(0.08, rawT - recess * 2);
     
     const bL = (brickType.length || 230) * 0.001;
     const bW = (brickType.width || 110) * 0.001;
@@ -144,9 +156,10 @@ export function SharedBrickWall({ wall, brickType, settings, position = [0, 0, 0
     let actualCount = 0;
     const dummy = new THREE.Object3D();
     
-    // Center the wall horizontally at origin
-    const startX = -l / 2;
-    const endX = l / 2;
+    // Center the wall horizontally at origin with clean bay clearance so bricks never bleed over column faces
+    const clearance = infillRecess !== false ? 0.004 : 0;
+    const startX = -l / 2 + clearance;
+    const endX = l / 2 - clearance;
     const startZ = -t / 2;
     
     for (let c = 0; c < actCourses; c++) {
@@ -254,8 +267,9 @@ export function SharedBrickWall({ wall, brickType, settings, position = [0, 0, 0
       });
       meshRef.current.instanceMatrix.needsUpdate = true;
       
-      if (!wireframe && meshRef.current.geometry) {
-        meshRef.current.geometry.setAttribute('color', new THREE.InstancedBufferAttribute(colors, 3));
+      if (!wireframe && colors && colors.length > 0) {
+        meshRef.current.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
+        meshRef.current.instanceColor.needsUpdate = true;
       }
     }
   }, [matrices, colors, wireframe]);
@@ -272,14 +286,14 @@ export function SharedBrickWall({ wall, brickType, settings, position = [0, 0, 0
       )}
 
       {brickCount > 0 && (
-        <instancedMesh ref={meshRef} args={[null as any, null as any, brickCount]} castShadow receiveShadow>
+        <instancedMesh ref={meshRef} args={[undefined, undefined, brickCount]} castShadow receiveShadow>
           <boxGeometry args={geometryArgs}>
             {/* Edges are extremely expensive for thousands of instances, so we remove them for performance */}
           </boxGeometry>
           {wireframe ? (
             <meshBasicMaterial color="#E85D04" wireframe={true} />
           ) : (
-            <meshStandardMaterial vertexColors roughness={0.9} metalness={0.05} />
+            <meshStandardMaterial roughness={0.9} metalness={0.05} />
           )}
         </instancedMesh>
       )}

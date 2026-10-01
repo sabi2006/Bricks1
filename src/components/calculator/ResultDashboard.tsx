@@ -118,6 +118,34 @@ Please contact me.`;
           </div>
         )}
 
+        {/* Plaster Surface Estimate */}
+        {result.plasterEstimate && result.plasterEstimate.totalNetPlasterAreaSqFt > 0 && (
+          <div className="pt-4 border-t border-white/10 space-y-2">
+            <div className="flex justify-between items-center">
+              <h4 className="text-sm font-semibold text-teal-400 flex items-center gap-1.5">
+                <span>🎨</span> Plaster / Rendering Estimate
+              </h4>
+              <span className="text-xs font-mono font-bold text-teal-300">
+                {result.plasterEstimate.totalNetPlasterAreaSqFt.toFixed(1)} sq.ft
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-white/5 border border-white/10 rounded-lg p-2.5 text-center">
+                <p className="text-[10px] text-slate-400 uppercase mb-0.5">Cement</p>
+                <p className="text-xs font-bold text-teal-300 font-mono">{result.plasterEstimate.totalCementBags.toFixed(1)} bags</p>
+              </div>
+              <div className="bg-white/5 border border-white/10 rounded-lg p-2.5 text-center">
+                <p className="text-[10px] text-slate-400 uppercase mb-0.5">Sand</p>
+                <p className="text-xs font-bold text-amber-300 font-mono">{result.plasterEstimate.totalSandCft.toFixed(1)} CFT</p>
+              </div>
+              <div className="bg-white/5 border border-white/10 rounded-lg p-2.5 text-center">
+                <p className="text-[10px] text-slate-400 uppercase mb-0.5">Cost</p>
+                <p className="text-xs font-bold text-teal-300 font-mono">₹{Math.round(result.plasterEstimate.costs.total).toLocaleString('en-IN')}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Advanced Estimation (Mortar/Cement) */}
         {difficulty === 'advanced' && (
           <div className="pt-4 border-t border-white/10 space-y-3">
@@ -142,7 +170,7 @@ Please contact me.`;
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm text-slate-400">Total Estimated Cost</span>
                 <span className="text-xl font-bold text-green-400">
-                  ₹{Math.round(result.costs.total + (result.rccProjectEstimate?.costs.total || 0)).toLocaleString('en-IN')}
+                  ₹{Math.round(result.costs.total + (result.rccProjectEstimate?.costs.total || 0) + (result.plasterEstimate?.costs.total || 0)).toLocaleString('en-IN')}
                 </span>
               </div>
               <div className="space-y-1 text-xs text-slate-500">
@@ -151,6 +179,9 @@ Please contact me.`;
                 <div className="flex justify-between"><span>Mortar Sand:</span> <span>₹{result.costs.sand.toLocaleString()}</span></div>
                 {result.rccProjectEstimate && result.rccProjectEstimate.costs.total > 0 && (
                   <div className="flex justify-between text-orange-400 font-medium"><span>RCC Structural:</span> <span>₹{Math.round(result.rccProjectEstimate.costs.total).toLocaleString('en-IN')}</span></div>
+                )}
+                {result.plasterEstimate && result.plasterEstimate.costs.total > 0 && (
+                  <div className="flex justify-between text-teal-400 font-medium"><span>Plaster / Finish:</span> <span>₹{Math.round(result.plasterEstimate.costs.total).toLocaleString('en-IN')}</span></div>
                 )}
               </div>
             </div>
